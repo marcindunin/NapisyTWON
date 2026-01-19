@@ -16,3 +16,4 @@ venv/
 ~$*
 settings.json
 recent_files.json
+*.pdf
