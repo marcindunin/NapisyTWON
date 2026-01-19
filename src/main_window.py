@@ -17,7 +17,8 @@ import fitz
 
 from .pdf_viewer import PDFViewer
 from .thumbnail_panel import ThumbnailPanel
-from .models import NumberAnnotation, NumberStyle, AnnotationStore, StylePresets
+from .annotation_list import AnnotationListPanel
+from .models import NumberAnnotation, NumberStyle, AnnotationStore, StylePresets, parse_number
 from .undo_manager import UndoManager, UndoAction
 
 
@@ -345,8 +346,16 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         # Page navigation
-        self._page_label = QLabel(" Page: 0/0 ")
-        toolbar.addWidget(self._page_label)
+        toolbar.addWidget(QLabel(" Page: "))
+        self._page_spin = QSpinBox()
+        self._page_spin.setRange(1, 1)
+        self._page_spin.setValue(1)
+        self._page_spin.setFixedWidth(60)
+        self._page_spin.valueChanged.connect(self._on_page_spin_changed)
+        toolbar.addWidget(self._page_spin)
+
+        self._page_total_label = QLabel(" / 0 ")
+        toolbar.addWidget(self._page_total_label)
 
         # Zoom indicator
         self._zoom_label = QLabel(" Zoom: 100% ")
@@ -364,8 +373,12 @@ class MainWindow(QMainWindow):
         self._viewer = PDFViewer()
         splitter.addWidget(self._viewer)
 
+        # Annotation list panel
+        self._annotation_panel = AnnotationListPanel()
+        splitter.addWidget(self._annotation_panel)
+
         # Set sizes
-        splitter.setSizes([150, 850])
+        splitter.setSizes([150, 700, 200])
 
         self.setCentralWidget(splitter)
 
@@ -384,9 +397,16 @@ class MainWindow(QMainWindow):
         self._viewer.annotation_added.connect(self._on_annotation_added)
         self._viewer.annotation_moved.connect(self._on_annotation_moved)
         self._viewer.annotation_deleted.connect(self._on_annotation_deleted)
+        self._viewer.duplicate_number_requested.connect(self._on_duplicate_number_requested)
 
         # Thumbnail panel signals
         self._thumbnail_panel.page_selected.connect(self._viewer.go_to_page)
+
+        # Annotation list panel signals
+        self._annotation_panel.jump_to_annotation.connect(self._jump_to_annotation)
+        self._annotation_panel.annotation_selected.connect(self._on_list_annotation_selected)
+        self._annotation_panel.change_number_requested.connect(self._change_annotation_number)
+        self._annotation_panel.delete_requested.connect(self._delete_annotation_with_options)
 
         # Undo manager signals
         self._undo_manager.state_changed.connect(self._update_undo_actions)
@@ -496,7 +516,10 @@ class MainWindow(QMainWindow):
             if doc:
                 self._thumbnail_panel.set_document(doc)
 
-            # Update page label
+            # Update annotation panel
+            self._refresh_annotation_panel()
+
+            # Update page navigation
             self._on_page_changed(0)
 
             self._statusbar.showMessage(f"Opened: {os.path.basename(path)}")
@@ -660,7 +683,9 @@ class MainWindow(QMainWindow):
             annotations = self._viewer.get_annotations()
             annotations.from_json(json_str)
             self._viewer.set_annotations(annotations)
+            self._refresh_annotation_panel()
             self._update_title()
+            self._update_thumbnail_indicators()
             self._statusbar.showMessage(f"Imported positions: {os.path.basename(path)}")
         except Exception as e:
             QMessageBox.critical(self, "Import Error", str(e))
@@ -683,8 +708,17 @@ class MainWindow(QMainWindow):
     def _on_page_changed(self, page: int):
         """Handle page change."""
         total = self._viewer.page_count()
-        self._page_label.setText(f" Page: {page + 1}/{total} ")
+        # Update page spinbox without triggering signal
+        self._page_spin.blockSignals(True)
+        self._page_spin.setRange(1, max(1, total))
+        self._page_spin.setValue(page + 1)
+        self._page_spin.blockSignals(False)
+        self._page_total_label.setText(f" / {total} ")
         self._thumbnail_panel.set_current_page(page)
+
+    def _on_page_spin_changed(self, value: int):
+        """Handle page spinbox value change."""
+        self._viewer.go_to_page(value - 1)
 
     def _on_zoom_changed(self, zoom: float):
         """Handle zoom change."""
@@ -700,22 +734,36 @@ class MainWindow(QMainWindow):
 
     def _on_annotation_added(self, annotation: NumberAnnotation):
         """Handle new annotation added."""
-        # Update next number spinner
-        self._number_spin.setValue(annotation.number + 1)
+        # Update next number spinner (only for whole numbers)
+        main, sub = parse_number(annotation.number)
+        if sub == 0:
+            self._number_spin.setValue(main + 1)
+
         self._update_title()
         self._update_thumbnail_indicators()
+        self._refresh_annotation_panel()
 
         # Add undo action
         action = UndoAction(
             description=f"Add #{annotation.number}",
             undo_data=annotation,
             redo_data=annotation,
-            undo_func=lambda a: self._viewer.delete_annotation(a),
-            redo_func=lambda a: self._viewer.add_annotation(a)
+            undo_func=lambda a: self._undo_add_annotation(a),
+            redo_func=lambda a: self._redo_add_annotation(a)
         )
         self._undo_manager.push(action)
 
         self._statusbar.showMessage(f"Added: #{annotation.number}")
+
+    def _undo_add_annotation(self, annotation: NumberAnnotation):
+        """Undo adding an annotation."""
+        self._viewer.delete_annotation(annotation)
+        self._refresh_annotation_panel()
+
+    def _redo_add_annotation(self, annotation: NumberAnnotation):
+        """Redo adding an annotation."""
+        self._viewer.add_annotation(annotation)
+        self._refresh_annotation_panel()
 
     def _on_annotation_moved(self, annotation: NumberAnnotation, old_x: float, old_y: float):
         """Handle annotation moved."""
@@ -745,17 +793,28 @@ class MainWindow(QMainWindow):
         """Handle annotation deleted."""
         self._update_title()
         self._update_thumbnail_indicators()
+        self._refresh_annotation_panel()
 
         action = UndoAction(
             description=f"Delete #{annotation.number}",
             undo_data=annotation,
             redo_data=annotation,
-            undo_func=lambda a: self._viewer.add_annotation(a),
-            redo_func=lambda a: self._viewer.delete_annotation(a)
+            undo_func=lambda a: self._undo_delete_annotation(a),
+            redo_func=lambda a: self._redo_delete_annotation(a)
         )
         self._undo_manager.push(action)
 
         self._statusbar.showMessage(f"Deleted: #{annotation.number}")
+
+    def _undo_delete_annotation(self, annotation: NumberAnnotation):
+        """Undo deleting an annotation."""
+        self._viewer.add_annotation(annotation)
+        self._refresh_annotation_panel()
+
+    def _redo_delete_annotation(self, annotation: NumberAnnotation):
+        """Redo deleting an annotation."""
+        self._viewer.delete_annotation(annotation)
+        self._refresh_annotation_panel()
 
     def _update_thumbnail_indicators(self):
         """Update annotation indicators on thumbnails."""
@@ -767,7 +826,7 @@ class MainWindow(QMainWindow):
 
     def _on_number_changed(self, value: int):
         """Handle next number changed."""
-        self._viewer.set_next_number(value)
+        self._viewer.set_next_number(str(value))
 
     def _on_style_changed(self):
         """Handle style settings changed."""
@@ -847,9 +906,193 @@ class MainWindow(QMainWindow):
             annotations.clear()
             self._viewer.set_annotations(annotations)
             self._undo_manager.clear()
+            self._refresh_annotation_panel()
             self._update_title()
             self._update_thumbnail_indicators()
             self._statusbar.showMessage("Cleared all annotations")
+
+    def _refresh_annotation_panel(self):
+        """Refresh the annotation list panel."""
+        self._annotation_panel.set_annotations(self._viewer.get_annotations())
+
+    def _on_duplicate_number_requested(self, number: str, pdf_x: float, pdf_y: float):
+        """Handle when user tries to insert a duplicate number."""
+        annotations = self._viewer.get_annotations()
+
+        # Show dialog with options
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Number Already Exists")
+        msg.setText(f"Number {number} already exists.")
+        msg.setInformativeText("What would you like to do?")
+
+        advance_btn = msg.addButton("Auto-advance others", QMessageBox.ButtonRole.ActionRole)
+        sub_btn = msg.addButton("Use sub-number", QMessageBox.ButtonRole.ActionRole)
+        cancel_btn = msg.addButton(QMessageBox.StandardButton.Cancel)
+
+        msg.exec()
+
+        if msg.clickedButton() == advance_btn:
+            # Auto-advance all numbers >= number
+            changes = annotations.advance_numbers_from(number, 1)
+            # Now insert the annotation with the original number
+            self._viewer.insert_annotation_at(pdf_x, pdf_y, number)
+            self._viewer.refresh_page()
+            self._refresh_annotation_panel()
+            self._statusbar.showMessage(f"Inserted #{number}, advanced {len(changes)} others")
+
+        elif msg.clickedButton() == sub_btn:
+            # Use next available sub-number
+            main, _ = parse_number(number)
+            sub_num = annotations.get_next_sub_number(str(main))
+            self._viewer.insert_annotation_at(pdf_x, pdf_y, sub_num)
+            self._statusbar.showMessage(f"Inserted #{sub_num}")
+
+    def _jump_to_annotation(self, annotation: NumberAnnotation):
+        """Jump to an annotation's location."""
+        self._viewer.go_to_page(annotation.page)
+        self._viewer.select_annotation(annotation)
+        self._viewer.center_on_annotation(annotation)
+
+    def _on_list_annotation_selected(self, annotation: NumberAnnotation):
+        """Handle annotation selected in the list."""
+        if annotation.page == self._viewer.current_page():
+            self._viewer.select_annotation(annotation)
+
+    def _change_annotation_number(self, annotation: NumberAnnotation):
+        """Show dialog to change an annotation's number."""
+        from PySide6.QtWidgets import QInputDialog
+
+        annotations = self._viewer.get_annotations()
+        current_num = annotation.number
+
+        new_num, ok = QInputDialog.getText(
+            self, "Change Number",
+            f"Enter new number for #{current_num}:",
+            text=current_num
+        )
+
+        if not ok or not new_num.strip():
+            return
+
+        new_num = new_num.strip()
+
+        # Validate the number format
+        try:
+            parse_number(new_num)
+        except (ValueError, IndexError):
+            QMessageBox.warning(self, "Invalid Number",
+                                "Please enter a valid number (e.g., 67 or 67.1)")
+            return
+
+        # Check for duplicates
+        if annotations.has_number(new_num) and new_num != current_num:
+            self._handle_duplicate_number(annotation, new_num)
+        else:
+            self._do_change_number(annotation, new_num)
+
+    def _handle_duplicate_number(self, annotation: NumberAnnotation, new_num: str):
+        """Handle when user tries to change to an existing number."""
+        annotations = self._viewer.get_annotations()
+
+        # Show dialog with options
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Number Already Exists")
+        msg.setText(f"Number {new_num} already exists.")
+        msg.setInformativeText("What would you like to do?")
+
+        advance_btn = msg.addButton("Auto-advance others", QMessageBox.ButtonRole.ActionRole)
+        sub_btn = msg.addButton("Use sub-number", QMessageBox.ButtonRole.ActionRole)
+        cancel_btn = msg.addButton(QMessageBox.StandardButton.Cancel)
+
+        msg.exec()
+
+        if msg.clickedButton() == advance_btn:
+            # Auto-advance all numbers >= new_num
+            old_num = annotation.number
+            changes = annotations.advance_numbers_from(new_num, 1)
+            annotation.number = new_num
+            self._viewer.refresh_page()
+            self._refresh_annotation_panel()
+            self._update_title()
+            self._statusbar.showMessage(f"Changed #{old_num} to #{new_num}, advanced {len(changes)} others")
+
+        elif msg.clickedButton() == sub_btn:
+            # Use next available sub-number
+            main, _ = parse_number(new_num)
+            sub_num = annotations.get_next_sub_number(str(main))
+            self._do_change_number(annotation, sub_num)
+
+    def _do_change_number(self, annotation: NumberAnnotation, new_num: str):
+        """Actually change an annotation's number."""
+        old_num = annotation.number
+        annotation.number = new_num
+
+        self._viewer.refresh_page()
+        self._refresh_annotation_panel()
+        self._update_title()
+
+        # Add undo action
+        action = UndoAction(
+            description=f"Change #{old_num} to #{new_num}",
+            undo_data=(annotation, old_num, new_num),
+            redo_data=(annotation, new_num, old_num),
+            undo_func=lambda d: self._restore_number(d[0], d[1]),
+            redo_func=lambda d: self._restore_number(d[0], d[1])
+        )
+        self._undo_manager.push(action)
+
+        self._statusbar.showMessage(f"Changed: #{old_num} to #{new_num}")
+
+    def _restore_number(self, annotation: NumberAnnotation, number: str):
+        """Restore an annotation's number (for undo/redo)."""
+        annotation.number = number
+        self._viewer.refresh_page()
+        self._refresh_annotation_panel()
+
+    def _delete_annotation_with_options(self, annotation: NumberAnnotation):
+        """Delete an annotation with option to auto-decrease following numbers."""
+        annotations = self._viewer.get_annotations()
+        main, sub = parse_number(annotation.number)
+
+        # Only offer auto-decrease for whole numbers
+        if sub == 0:
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Delete Annotation")
+            msg.setText(f"Delete annotation #{annotation.number}?")
+            msg.setInformativeText("Do you want to auto-decrease following numbers?")
+
+            decrease_btn = msg.addButton("Delete && decrease others", QMessageBox.ButtonRole.ActionRole)
+            delete_btn = msg.addButton("Delete only", QMessageBox.ButtonRole.ActionRole)
+            cancel_btn = msg.addButton(QMessageBox.StandardButton.Cancel)
+
+            msg.exec()
+
+            if msg.clickedButton() == cancel_btn:
+                return
+
+            if msg.clickedButton() == decrease_btn:
+                # First collect changes, then delete and apply
+                changes = annotations.decrease_numbers_from(annotation.number, 1)
+                self._viewer.delete_annotation(annotation)
+                self._viewer.refresh_page()
+                self._refresh_annotation_panel()
+                self._update_title()
+                self._update_thumbnail_indicators()
+                self._statusbar.showMessage(f"Deleted #{annotation.number}, decreased {len(changes)} others")
+                return
+
+            # Fall through to regular delete
+            if msg.clickedButton() == delete_btn:
+                self._viewer.delete_annotation(annotation)
+        else:
+            # Sub-numbers: just confirm deletion
+            result = QMessageBox.question(
+                self, "Delete Annotation",
+                f"Delete annotation #{annotation.number}?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if result == QMessageBox.StandardButton.Yes:
+                self._viewer.delete_annotation(annotation)
 
     def closeEvent(self, event):
         """Handle window close."""

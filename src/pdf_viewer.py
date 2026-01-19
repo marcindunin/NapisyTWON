@@ -11,7 +11,7 @@ from PySide6.QtGui import (
     QWheelEvent, QMouseEvent, QKeyEvent
 )
 from typing import Optional, Callable
-from .models import NumberAnnotation, NumberStyle, AnnotationStore
+from .models import NumberAnnotation, NumberStyle, AnnotationStore, parse_number
 
 
 class AnnotationItem(QGraphicsRectItem):
@@ -98,10 +98,10 @@ class AnnotationItem(QGraphicsRectItem):
 class NumberPreviewItem(QGraphicsRectItem):
     """Preview item shown at cursor when inserting numbers."""
 
-    def __init__(self, style: NumberStyle, number: int, scale: float = 1.0):
+    def __init__(self, style: NumberStyle, number: str, scale: float = 1.0):
         super().__init__()
         self.style = style
-        self.number = number
+        self.number = str(number)
         self._scale = scale
         self.setOpacity(0.7)
         self.update_display()
@@ -119,9 +119,9 @@ class NumberPreviewItem(QGraphicsRectItem):
 
         self.setRect(-width / 2, -height / 2, width, height)
 
-    def set_style(self, style: NumberStyle, number: int):
+    def set_style(self, style: NumberStyle, number: str):
         self.style = style
-        self.number = number
+        self.number = str(number)
         self.update_display()
         self.update()
 
@@ -156,6 +156,7 @@ class PDFViewer(QGraphicsView):
     annotation_added = Signal(object)  # NumberAnnotation
     annotation_moved = Signal(object, float, float)  # annotation, old_x, old_y
     annotation_deleted = Signal(object)  # NumberAnnotation
+    duplicate_number_requested = Signal(str, float, float)  # number, pdf_x, pdf_y
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -188,7 +189,7 @@ class PDFViewer(QGraphicsView):
         # Preview
         self._preview_item: Optional[NumberPreviewItem] = None
         self._current_style = NumberStyle()
-        self._next_number = 1
+        self._next_number = "1"
         self._insert_mode = True
 
         # Setup
@@ -319,11 +320,11 @@ class PDFViewer(QGraphicsView):
         if self._preview_item:
             self._preview_item.set_style(style, self._next_number)
 
-    def set_next_number(self, number: int):
+    def set_next_number(self, number: str):
         """Set the next number to insert."""
-        self._next_number = number
+        self._next_number = str(number)
         if self._preview_item:
-            self._preview_item.set_style(self._current_style, number)
+            self._preview_item.set_style(self._current_style, self._next_number)
 
     def get_annotations(self) -> AnnotationStore:
         return self._annotations
@@ -550,12 +551,22 @@ class PDFViewer(QGraphicsView):
         pdf_x -= width / 2
         pdf_y -= height / 2
 
+        # Check for duplicate
+        if self._annotations.has_number(self._next_number):
+            # Emit signal for main window to handle
+            self.duplicate_number_requested.emit(self._next_number, pdf_x, pdf_y)
+            return
+
+        self._do_insert_annotation(pdf_x, pdf_y, self._next_number)
+
+    def _do_insert_annotation(self, pdf_x: float, pdf_y: float, number: str):
+        """Actually insert an annotation at the given PDF coordinates."""
         # Create annotation
         annotation = NumberAnnotation(
             page=self._current_page,
             x=pdf_x,
             y=pdf_y,
-            number=self._next_number,
+            number=number,
             style=NumberStyle(**{
                 'name': self._current_style.name,
                 'font_family': self._current_style.font_family,
@@ -570,12 +581,25 @@ class PDFViewer(QGraphicsView):
         self._annotations.add(annotation)
         self._add_annotation_item(annotation)
 
-        # Auto-increment
-        self._next_number += 1
+        # Auto-increment (only for whole numbers)
+        main, sub = parse_number(number)
+        if sub == 0:
+            self._next_number = str(main + 1)
+        else:
+            # For sub-numbers, just increment the sub
+            self._next_number = f"{main}.{sub + 1}"
+
         if self._preview_item:
             self._preview_item.set_style(self._current_style, self._next_number)
 
         self.annotation_added.emit(annotation)
+
+    def insert_annotation_at(self, pdf_x: float, pdf_y: float, number: str):
+        """Insert an annotation at the given position with the given number.
+
+        Used by main window when handling duplicate number resolution.
+        """
+        self._do_insert_annotation(pdf_x, pdf_y, number)
 
     def _delete_selected_annotation(self):
         """Delete the currently selected annotation."""
@@ -661,3 +685,19 @@ class PDFViewer(QGraphicsView):
 
         painter.end()
         return img
+
+    def refresh_page(self):
+        """Refresh the current page display."""
+        self._render_page()
+
+    def select_annotation(self, annotation: NumberAnnotation):
+        """Select a specific annotation by its data."""
+        if annotation.id in self._annotation_items:
+            item = self._annotation_items[annotation.id]
+            self._select_annotation(item)
+
+    def center_on_annotation(self, annotation: NumberAnnotation):
+        """Center the view on an annotation."""
+        if annotation.id in self._annotation_items:
+            item = self._annotation_items[annotation.id]
+            self.centerOn(item)
