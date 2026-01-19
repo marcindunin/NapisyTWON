@@ -226,6 +226,7 @@ class PDFViewer(QGraphicsView):
             self._doc = None
         self._scene.clear()
         self._page_pixmap = None
+        self._preview_item = None  # Reset since scene.clear() deleted it
         self._annotation_items.clear()
         self._annotations.clear()
         self._selected_annotation = None
@@ -281,8 +282,9 @@ class PDFViewer(QGraphicsView):
         img = QImage(pix.samples, pix.width, pix.height, pix.stride, fmt)
         pixmap = QPixmap.fromImage(img)
 
-        # Update scene
+        # Update scene (clear also deletes preview item)
         self._scene.clear()
+        self._preview_item = None  # Reset reference since scene.clear() deleted it
         self._page_pixmap = self._scene.addPixmap(pixmap)
         self._scene.setSceneRect(0, 0, pixmap.width(), pixmap.height())
 
@@ -456,15 +458,19 @@ class PDFViewer(QGraphicsView):
             return
 
         # Update preview position
-        if self._insert_mode and self._preview_item:
-            scene_pos = self.mapToScene(event.position().toPoint())
-            if self._page_pixmap and self._page_pixmap.boundingRect().contains(scene_pos):
-                self._preview_item.setPos(scene_pos)
-                self._preview_item.setVisible(True)
-                self.setCursor(Qt.CursorShape.CrossCursor)
-            else:
-                self._preview_item.setVisible(False)
-                self.setCursor(Qt.CursorShape.ArrowCursor)
+        if self._insert_mode and self._preview_item is not None:
+            try:
+                scene_pos = self.mapToScene(event.position().toPoint())
+                if self._page_pixmap and self._page_pixmap.boundingRect().contains(scene_pos):
+                    self._preview_item.setPos(scene_pos)
+                    self._preview_item.setVisible(True)
+                    self.setCursor(Qt.CursorShape.CrossCursor)
+                else:
+                    self._preview_item.setVisible(False)
+                    self.setCursor(Qt.CursorShape.ArrowCursor)
+            except RuntimeError:
+                # Item was deleted, reset reference
+                self._preview_item = None
 
         super().mouseMoveEvent(event)
 
