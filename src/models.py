@@ -51,6 +51,9 @@ class NumberStyle:
     bg_color: str = "#FFFF00"
     bg_opacity: float = 1.0
     padding: int = 4
+    border_enabled: bool = False
+    border_color: str = "#000000"
+    border_width: int = 2
 
     def to_dict(self) -> dict:
         return asdict(self)

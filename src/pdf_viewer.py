@@ -1,6 +1,7 @@
 """PDF viewer widget with zoom, pan, and annotation support."""
 
 import fitz
+from enum import Enum
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
     QGraphicsRectItem, QGraphicsTextItem, QApplication
@@ -12,6 +13,11 @@ from PySide6.QtGui import (
 )
 from typing import Optional, Callable
 from .models import NumberAnnotation, NumberStyle, AnnotationStore, parse_number
+
+
+class ToolMode(Enum):
+    INSERT = "insert"
+    SELECT = "select"
 
 
 class AnnotationItem(QGraphicsRectItem):
@@ -68,7 +74,13 @@ class AnnotationItem(QGraphicsRectItem):
         bg_color.setAlphaF(style.bg_opacity)
         painter.fillRect(rect, bg_color)
 
-        # Border if selected or hovered
+        # Style border (if enabled)
+        if style.border_enabled:
+            border_width = max(1, int(style.border_width * self._scale))
+            painter.setPen(QPen(QColor(style.border_color), border_width))
+            painter.drawRect(rect.adjusted(border_width/2, border_width/2, -border_width/2, -border_width/2))
+
+        # Selection/hover border (drawn on top)
         if self._selected:
             painter.setPen(QPen(QColor("#FF0000"), 2))
             painter.drawRect(rect)
@@ -137,6 +149,14 @@ class NumberPreviewItem(QGraphicsRectItem):
         bg_color.setAlphaF(self.style.bg_opacity * 0.7)
         painter.fillRect(rect, bg_color)
 
+        # Border (if enabled)
+        if self.style.border_enabled:
+            border_width = max(1, int(self.style.border_width * self._scale))
+            border_color = QColor(self.style.border_color)
+            border_color.setAlphaF(0.7)
+            painter.setPen(QPen(border_color, border_width))
+            painter.drawRect(rect.adjusted(border_width/2, border_width/2, -border_width/2, -border_width/2))
+
         # Text
         font = QFont(self.style.font_family, int(self.style.font_size * self._scale))
         painter.setFont(font)
@@ -157,6 +177,8 @@ class PDFViewer(QGraphicsView):
     annotation_moved = Signal(object, float, float)  # annotation, old_x, old_y
     annotation_deleted = Signal(object)  # NumberAnnotation
     duplicate_number_requested = Signal(str, float, float)  # number, pdf_x, pdf_y
+    edit_annotation_requested = Signal(object)  # NumberAnnotation (double-click)
+    tool_changed = Signal(str)  # tool mode name
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -190,7 +212,7 @@ class PDFViewer(QGraphicsView):
         self._preview_item: Optional[NumberPreviewItem] = None
         self._current_style = NumberStyle()
         self._next_number = "1"
-        self._insert_mode = True
+        self._tool_mode = ToolMode.INSERT
 
         # Setup
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -283,9 +305,10 @@ class PDFViewer(QGraphicsView):
         img = QImage(pix.samples, pix.width, pix.height, pix.stride, fmt)
         pixmap = QPixmap.fromImage(img)
 
-        # Update scene (clear also deletes preview item)
+        # Update scene (clear also deletes preview item and annotation items)
         self._scene.clear()
         self._preview_item = None  # Reset reference since scene.clear() deleted it
+        self._selected_annotation = None  # Reset since items are deleted
         self._page_pixmap = self._scene.addPixmap(pixmap)
         self._scene.setSceneRect(0, 0, pixmap.width(), pixmap.height())
 
@@ -295,7 +318,7 @@ class PDFViewer(QGraphicsView):
             self._add_annotation_item(annotation)
 
         # Re-create preview if in insert mode
-        if self._insert_mode:
+        if self._tool_mode == ToolMode.INSERT:
             self._create_preview()
 
         self.zoom_changed.emit(self._zoom)
@@ -356,13 +379,22 @@ class PDFViewer(QGraphicsView):
     def get_zoom(self) -> float:
         return self._zoom
 
-    def set_insert_mode(self, enabled: bool):
-        """Enable/disable insert mode."""
-        self._insert_mode = enabled
+    def set_tool_mode(self, mode: ToolMode):
+        """Set the current tool mode."""
+        self._tool_mode = mode
         if self._preview_item:
             self._preview_item.setVisible(False)
-        if not enabled:
+        if mode == ToolMode.SELECT:
             self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.tool_changed.emit(mode.value)
+
+    def get_tool_mode(self) -> ToolMode:
+        """Get the current tool mode."""
+        return self._tool_mode
+
+    def set_insert_mode(self, enabled: bool):
+        """Enable/disable insert mode (legacy method)."""
+        self.set_tool_mode(ToolMode.INSERT if enabled else ToolMode.SELECT)
 
     def wheelEvent(self, event: QWheelEvent):
         """Handle mouse wheel for zooming."""
@@ -393,7 +425,8 @@ class PDFViewer(QGraphicsView):
 
             # Check if clicked on annotation
             if isinstance(item, AnnotationItem):
-                # Start dragging or select
+                # In SELECT mode: select and prepare for dragging
+                # In INSERT mode: also allow selecting existing annotations
                 self._select_annotation(item)
                 self._dragging_annotation = item
                 self._drag_start_pos = scene_pos
@@ -408,8 +441,8 @@ class PDFViewer(QGraphicsView):
             if self._selected_annotation:
                 self._deselect_annotation()
 
-            # Insert new annotation if in insert mode
-            if self._insert_mode and self._page_pixmap:
+            # Insert new annotation only in INSERT mode
+            if self._tool_mode == ToolMode.INSERT and self._page_pixmap:
                 # Check if click is on the page
                 page_rect = self._page_pixmap.boundingRect()
                 if page_rect.contains(scene_pos):
@@ -425,6 +458,20 @@ class PDFViewer(QGraphicsView):
             return
 
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        """Handle double-click for editing annotations."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            scene_pos = self.mapToScene(event.position().toPoint())
+            item = self._scene.itemAt(scene_pos, self.transform())
+
+            if isinstance(item, AnnotationItem):
+                # Emit edit request
+                self.edit_annotation_requested.emit(item.annotation)
+                event.accept()
+                return
+
+        super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._panning:
@@ -458,8 +505,8 @@ class PDFViewer(QGraphicsView):
             event.accept()
             return
 
-        # Update preview position
-        if self._insert_mode and self._preview_item is not None:
+        # Update preview position (only in INSERT mode)
+        if self._tool_mode == ToolMode.INSERT and self._preview_item is not None:
             try:
                 scene_pos = self.mapToScene(event.position().toPoint())
                 if self._page_pixmap and self._page_pixmap.boundingRect().contains(scene_pos):
@@ -529,7 +576,11 @@ class PDFViewer(QGraphicsView):
     def _deselect_annotation(self):
         """Deselect current annotation."""
         if self._selected_annotation:
-            self._selected_annotation.set_selected(False)
+            try:
+                self._selected_annotation.set_selected(False)
+            except RuntimeError:
+                # Item was already deleted
+                pass
             self._selected_annotation = None
             self.annotation_selected.emit(None)
 
@@ -575,6 +626,9 @@ class PDFViewer(QGraphicsView):
                 'bg_color': self._current_style.bg_color,
                 'bg_opacity': self._current_style.bg_opacity,
                 'padding': self._current_style.padding,
+                'border_enabled': self._current_style.border_enabled,
+                'border_color': self._current_style.border_color,
+                'border_width': self._current_style.border_width,
             })
         )
 
@@ -678,6 +732,12 @@ class PDFViewer(QGraphicsView):
             bg_color = QColor(style.bg_color)
             bg_color.setAlphaF(style.bg_opacity)
             painter.fillRect(rect, bg_color)
+
+            # Border (if enabled)
+            if style.border_enabled:
+                border_width = max(1, int(style.border_width * scale))
+                painter.setPen(QPen(QColor(style.border_color), border_width))
+                painter.drawRect(rect.adjusted(border_width/2, border_width/2, -border_width/2, -border_width/2))
 
             # Text
             painter.setPen(QColor(style.text_color))

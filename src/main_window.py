@@ -15,7 +15,7 @@ from PySide6.QtGui import QAction, QIcon, QColor, QKeySequence, QFont, QFontData
 from typing import Optional
 import fitz
 
-from .pdf_viewer import PDFViewer
+from .pdf_viewer import PDFViewer, ToolMode
 from .thumbnail_panel import ThumbnailPanel
 from .annotation_list import AnnotationListPanel
 from .models import NumberAnnotation, NumberStyle, AnnotationStore, StylePresets, parse_number
@@ -279,14 +279,28 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
+        # Tool mode buttons
+        toolbar.addWidget(QLabel(" Tool: "))
+        self._insert_tool_btn = QPushButton("Insert")
+        self._insert_tool_btn.setCheckable(True)
+        self._insert_tool_btn.setChecked(True)
+        self._insert_tool_btn.clicked.connect(lambda: self._set_tool_mode(ToolMode.INSERT))
+        toolbar.addWidget(self._insert_tool_btn)
+
+        self._select_tool_btn = QPushButton("Select")
+        self._select_tool_btn.setCheckable(True)
+        self._select_tool_btn.clicked.connect(lambda: self._set_tool_mode(ToolMode.SELECT))
+        toolbar.addWidget(self._select_tool_btn)
+
+        toolbar.addSeparator()
+
         # Number settings
         toolbar.addWidget(QLabel(" Next #: "))
-        self._number_spin = QSpinBox()
-        self._number_spin.setRange(1, 9999)
-        self._number_spin.setValue(1)
-        self._number_spin.setFixedWidth(70)
-        self._number_spin.valueChanged.connect(self._on_number_changed)
-        toolbar.addWidget(self._number_spin)
+        self._number_edit = QLineEdit()
+        self._number_edit.setText("1")
+        self._number_edit.setFixedWidth(70)
+        self._number_edit.editingFinished.connect(self._on_number_edited)
+        toolbar.addWidget(self._number_edit)
 
         toolbar.addSeparator()
 
@@ -335,6 +349,37 @@ class MainWindow(QMainWindow):
         self._opacity_spin.setFixedWidth(60)
         self._opacity_spin.valueChanged.connect(self._on_style_changed)
         toolbar.addWidget(self._opacity_spin)
+
+        toolbar.addSeparator()
+
+        # Border settings
+        from PySide6.QtWidgets import QCheckBox
+        self._border_check = QCheckBox("Border")
+        self._border_check.stateChanged.connect(self._on_style_changed)
+        toolbar.addWidget(self._border_check)
+
+        self._border_color_btn = QPushButton()
+        self._border_color_btn.setFixedSize(30, 25)
+        self._border_color_btn.setStyleSheet("background-color: #000000;")
+        self._border_color_btn.clicked.connect(self._choose_border_color)
+        self._border_color_btn.setToolTip("Border color")
+        toolbar.addWidget(self._border_color_btn)
+
+        self._border_width_spin = QSpinBox()
+        self._border_width_spin.setRange(1, 20)
+        self._border_width_spin.setValue(2)
+        self._border_width_spin.setFixedWidth(50)
+        self._border_width_spin.setToolTip("Border width")
+        self._border_width_spin.valueChanged.connect(self._on_style_changed)
+        toolbar.addWidget(self._border_width_spin)
+
+        toolbar.addSeparator()
+
+        # Apply to selected button
+        self._apply_style_btn = QPushButton("Apply to Selected")
+        self._apply_style_btn.setEnabled(False)
+        self._apply_style_btn.clicked.connect(self._apply_style_to_selected)
+        toolbar.addWidget(self._apply_style_btn)
 
         toolbar.addSeparator()
 
@@ -398,6 +443,7 @@ class MainWindow(QMainWindow):
         self._viewer.annotation_moved.connect(self._on_annotation_moved)
         self._viewer.annotation_deleted.connect(self._on_annotation_deleted)
         self._viewer.duplicate_number_requested.connect(self._on_duplicate_number_requested)
+        self._viewer.edit_annotation_requested.connect(self._change_annotation_number)
 
         # Thumbnail panel signals
         self._thumbnail_panel.page_selected.connect(self._viewer.go_to_page)
@@ -454,6 +500,9 @@ class MainWindow(QMainWindow):
         self._text_color_btn.setStyleSheet(f"background-color: {self._style.text_color};")
         self._bg_color_btn.setStyleSheet(f"background-color: {self._style.bg_color};")
         self._opacity_spin.setValue(self._style.bg_opacity)
+        self._border_check.setChecked(self._style.border_enabled)
+        self._border_color_btn.setStyleSheet(f"background-color: {self._style.border_color};")
+        self._border_width_spin.setValue(self._style.border_width)
 
     def _update_recent_menu(self):
         """Update the recent files menu."""
@@ -585,19 +634,21 @@ class MainWindow(QMainWindow):
                 fg_rgb = hex_to_rgb(style.text_color)
                 bg_rgb = hex_to_rgb(style.bg_color) if style.bg_opacity > 0 else None
 
-                # Calculate rect
-                text_width = len(text) * style.font_size * 0.6
-                text_height = style.font_size * 1.2
+                # Calculate rect using font metrics
+                font = fitz.Font("helv")
+                text_width = font.text_length(text, fontsize=style.font_size)
+                text_height = style.font_size
                 padding = style.padding
 
+                # Make rect slightly larger for better centering
                 rect = fitz.Rect(
                     annotation.x,
                     annotation.y,
                     annotation.x + text_width + padding * 2,
-                    annotation.y + text_height + padding
+                    annotation.y + text_height + padding * 2
                 )
 
-                # Add annotation
+                # Create FreeText annotation (moveable object with editable text)
                 annot = page.add_freetext_annot(
                     rect,
                     text,
@@ -605,11 +656,26 @@ class MainWindow(QMainWindow):
                     fontname="helv",
                     text_color=fg_rgb,
                     fill_color=bg_rgb,
-                    align=fitz.TEXT_ALIGN_CENTER
+                    align=fitz.TEXT_ALIGN_CENTER,
                 )
+
                 if bg_rgb and style.bg_opacity < 1.0:
                     annot.set_opacity(style.bg_opacity)
+
                 annot.update()
+
+                # Set border via annotation dictionary if enabled (after update to preserve appearance)
+                if style.border_enabled:
+                    border_rgb = hex_to_rgb(style.border_color)
+                    annot_obj = annot.xref
+                    # Set border array: [horizontal corner radius, vertical corner radius, width]
+                    doc.xref_set_key(annot_obj, "Border", f"[0 0 {style.border_width}]")
+                    # Set Border Style dictionary with width and solid style
+                    doc.xref_set_key(annot_obj, "BS", f"<</W {style.border_width}/S/S>>")
+
+                    # For FreeText, we need to rebuild the appearance stream to include the border
+                    # Get current appearance and modify it
+                    annot.update()  # Regenerate appearance with border settings
 
                 annotation.applied_to_pdf = True
 
@@ -727,17 +793,60 @@ class MainWindow(QMainWindow):
     def _on_annotation_selected(self, annotation):
         """Handle annotation selection."""
         self.action_delete.setEnabled(annotation is not None)
+        self._apply_style_btn.setEnabled(annotation is not None)
         if annotation:
             self._statusbar.showMessage(f"Selected: #{annotation.number}")
+            # Load annotation's style into the controls
+            self._load_style_to_controls(annotation.style)
         else:
             self._statusbar.showMessage("Ready")
 
+    def _load_style_to_controls(self, style: NumberStyle):
+        """Load a style's settings into the toolbar controls."""
+        # Block signals to avoid triggering changes
+        self._font_combo.blockSignals(True)
+        self._size_spin.blockSignals(True)
+        self._opacity_spin.blockSignals(True)
+        self._border_check.blockSignals(True)
+        self._border_width_spin.blockSignals(True)
+
+        self._font_combo.setCurrentText(style.font_family)
+        self._size_spin.setValue(style.font_size)
+        self._text_color_btn.setStyleSheet(f"background-color: {style.text_color};")
+        self._bg_color_btn.setStyleSheet(f"background-color: {style.bg_color};")
+        self._opacity_spin.setValue(style.bg_opacity)
+        self._border_check.setChecked(style.border_enabled)
+        self._border_color_btn.setStyleSheet(f"background-color: {style.border_color};")
+        self._border_width_spin.setValue(style.border_width)
+
+        # Update internal style
+        self._style = NumberStyle(
+            name=style.name,
+            font_family=style.font_family,
+            font_size=style.font_size,
+            text_color=style.text_color,
+            bg_color=style.bg_color,
+            bg_opacity=style.bg_opacity,
+            padding=style.padding,
+            border_enabled=style.border_enabled,
+            border_color=style.border_color,
+            border_width=style.border_width
+        )
+
+        self._font_combo.blockSignals(False)
+        self._size_spin.blockSignals(False)
+        self._opacity_spin.blockSignals(False)
+        self._border_check.blockSignals(False)
+        self._border_width_spin.blockSignals(False)
+
     def _on_annotation_added(self, annotation: NumberAnnotation):
         """Handle new annotation added."""
-        # Update next number spinner (only for whole numbers)
+        # Update next number field
         main, sub = parse_number(annotation.number)
         if sub == 0:
-            self._number_spin.setValue(main + 1)
+            self._number_edit.setText(str(main + 1))
+        else:
+            self._number_edit.setText(f"{main}.{sub + 1}")
 
         self._update_title()
         self._update_thumbnail_indicators()
@@ -824,15 +933,32 @@ class MainWindow(QMainWindow):
             by_page[a.page] = by_page.get(a.page, 0) + 1
         self._thumbnail_panel.update_annotation_indicators(by_page)
 
-    def _on_number_changed(self, value: int):
+    def _on_number_edited(self):
         """Handle next number changed."""
-        self._viewer.set_next_number(str(value))
+        text = self._number_edit.text().strip()
+        if text:
+            # Validate the number format
+            try:
+                parse_number(text)
+                self._viewer.set_next_number(text)
+            except (ValueError, IndexError):
+                # Invalid format, reset to current
+                pass
+
+    def _set_tool_mode(self, mode: ToolMode):
+        """Set the current tool mode."""
+        self._viewer.set_tool_mode(mode)
+        self._insert_tool_btn.setChecked(mode == ToolMode.INSERT)
+        self._select_tool_btn.setChecked(mode == ToolMode.SELECT)
+        self._statusbar.showMessage(f"Tool: {mode.value.capitalize()}")
 
     def _on_style_changed(self):
         """Handle style settings changed."""
         self._style.font_family = self._font_combo.currentText()
         self._style.font_size = self._size_spin.value()
         self._style.bg_opacity = self._opacity_spin.value()
+        self._style.border_enabled = self._border_check.isChecked()
+        self._style.border_width = self._border_width_spin.value()
         self._viewer.set_style(self._style)
 
     def _choose_text_color(self):
@@ -850,6 +976,39 @@ class MainWindow(QMainWindow):
             self._style.bg_color = color.name()
             self._bg_color_btn.setStyleSheet(f"background-color: {color.name()};")
             self._on_style_changed()
+
+    def _choose_border_color(self):
+        """Open color picker for border color."""
+        color = QColorDialog.getColor(QColor(self._style.border_color), self)
+        if color.isValid():
+            self._style.border_color = color.name()
+            self._border_color_btn.setStyleSheet(f"background-color: {color.name()};")
+            self._on_style_changed()
+
+    def _apply_style_to_selected(self):
+        """Apply current style to the selected annotation."""
+        # Get selected annotation from viewer
+        selected = self._viewer._selected_annotation
+        if not selected:
+            return
+
+        annotation = selected.annotation
+        old_style = NumberStyle(**annotation.style.to_dict())
+
+        # Apply current style settings
+        annotation.style.font_family = self._style.font_family
+        annotation.style.font_size = self._style.font_size
+        annotation.style.text_color = self._style.text_color
+        annotation.style.bg_color = self._style.bg_color
+        annotation.style.bg_opacity = self._style.bg_opacity
+        annotation.style.border_enabled = self._style.border_enabled
+        annotation.style.border_color = self._style.border_color
+        annotation.style.border_width = self._style.border_width
+
+        # Refresh display
+        self._viewer.refresh_page()
+        self._update_title()
+        self._statusbar.showMessage(f"Applied style to #{annotation.number}")
 
     def _show_presets(self):
         """Show style presets dialog."""
