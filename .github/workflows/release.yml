@@ -1,0 +1,96 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: Napisy-TWON-v2-Windows.exe
+            pyinstaller_args: --onefile --windowed --name "Napisy-TWON-v2"
+          - os: macos-latest
+            artifact_name: Napisy-TWON-v2-macOS
+            pyinstaller_args: --onefile --windowed --name "Napisy-TWON-v2"
+          - os: ubuntu-latest
+            artifact_name: Napisy-TWON-v2-Linux
+            pyinstaller_args: --onefile --name "Napisy-TWON-v2"
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxkbcommon0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller ${{ matrix.pyinstaller_args }} main.py
+
+      - name: Rename artifact (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          move dist\Napisy-TWON-v2.exe dist\${{ matrix.artifact_name }}
+
+      - name: Rename artifact (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mv dist/Napisy-TWON-v2 dist/${{ matrix.artifact_name }}
+
+      - name: Rename artifact (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mv dist/Napisy-TWON-v2 dist/${{ matrix.artifact_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.artifact_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/Napisy-TWON-v2-Windows.exe/Napisy-TWON-v2-Windows.exe
+            artifacts/Napisy-TWON-v2-macOS/Napisy-TWON-v2-macOS
+            artifacts/Napisy-TWON-v2-Linux/Napisy-TWON-v2-Linux
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
