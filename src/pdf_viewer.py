@@ -24,6 +24,10 @@ class ToolMode(Enum):
     SELECT = "select"
 
 
+# Metadata key for storing our annotation data in PDF
+NAPISY_METADATA_KEY = "NapisyTWON_Annotations"
+
+
 class SelectionOverlay(QGraphicsRectItem):
     """Overlay to show selection/hover state on annotations."""
 
@@ -210,6 +214,11 @@ class PDFViewer(QGraphicsView):
             self._current_page = 0
             self._annotations.clear()
             self._selected_annotation = None
+
+            # Try to load our annotation metadata from PDF
+            if self.load_metadata_from_pdf():
+                print(f"Loaded {len(self._annotations.all())} annotations from PDF metadata")
+
             self._render_page()
             return True
         except Exception as e:
@@ -424,6 +433,9 @@ class PDFViewer(QGraphicsView):
         annot.update()
 
         annot_xref = annot.xref
+
+        # Set annotation name (/NM) to our UUID for identification
+        annot.set_name(annotation.id)
 
         # Explicitly set /Q (quadding) to 1 for center alignment
         # This helps ensure Acrobat respects the alignment when editing
@@ -940,3 +952,68 @@ class PDFViewer(QGraphicsView):
                         abs(annot_rect.y1 - expected_rect.y1) < 2):
                         annotation.pdf_annot_xref = annot.xref
                         break
+
+    def save_metadata_to_pdf(self):
+        """Save our annotation data as JSON in PDF metadata."""
+        if not self._doc:
+            return
+
+        import json
+
+        # Serialize annotation store to JSON
+        annotations_json = self._annotations.to_json()
+
+        # Get current metadata and add our data
+        metadata = self._doc.metadata or {}
+        metadata["keywords"] = f"{NAPISY_METADATA_KEY}:{annotations_json}"
+
+        # Set metadata
+        self._doc.set_metadata(metadata)
+
+    def load_metadata_from_pdf(self) -> bool:
+        """Load our annotation data from PDF metadata. Returns True if found."""
+        if not self._doc:
+            return False
+
+        import json
+
+        try:
+            metadata = self._doc.metadata
+            if not metadata:
+                return False
+
+            keywords = metadata.get("keywords", "")
+            if not keywords or not keywords.startswith(f"{NAPISY_METADATA_KEY}:"):
+                return False
+
+            # Extract JSON after our marker
+            json_str = keywords[len(f"{NAPISY_METADATA_KEY}:"):]
+
+            # Parse and restore annotations
+            self._annotations.from_json(json_str)
+
+            # Match annotations to PDF annotation xrefs by name (/NM)
+            self._sync_xrefs_by_name()
+
+            return True
+
+        except Exception as e:
+            print(f"Error loading metadata: {e}")
+            return False
+
+    def _sync_xrefs_by_name(self):
+        """Sync annotation xrefs by matching /NM field to our annotation IDs."""
+        if not self._doc:
+            return
+
+        # Build a map of annotation ID -> annotation
+        id_to_annotation = {a.id: a for a in self._annotations.all()}
+
+        # Scan all pages for annotations with matching names
+        for page_num in range(self._doc.page_count):
+            page = self._doc.load_page(page_num)
+            for annot in page.annots():
+                if annot.type[0] == fitz.PDF_ANNOT_FREE_TEXT:
+                    name = annot.info.get("name", "")
+                    if name in id_to_annotation:
+                        id_to_annotation[name].pdf_annot_xref = annot.xref

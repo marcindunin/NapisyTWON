@@ -560,10 +560,18 @@ class MainWindow(QMainWindow):
             # Update annotation panel
             self._refresh_annotation_panel()
 
+            # Update thumbnail indicators (in case annotations were loaded from metadata)
+            self._update_thumbnail_indicators()
+
             # Update page navigation
             self._on_page_changed(0)
 
-            self._statusbar.showMessage(f"Opened: {os.path.basename(path)}")
+            # Show message about loaded annotations
+            num_annotations = len(self._viewer.get_annotations().all())
+            if num_annotations > 0:
+                self._statusbar.showMessage(f"Opened: {os.path.basename(path)} ({num_annotations} annotations)")
+            else:
+                self._statusbar.showMessage(f"Opened: {os.path.basename(path)}")
         else:
             QMessageBox.warning(self, "Error", f"Could not open file:\n{path}")
 
@@ -608,6 +616,9 @@ class MainWindow(QMainWindow):
             return
 
         try:
+            # Save our annotation metadata to PDF before saving
+            self._viewer.save_metadata_to_pdf()
+
             # Annotations are already in the PDF (direct editing mode)
             # Just save the document
             doc.save(path, garbage=4, deflate=True)
