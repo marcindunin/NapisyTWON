@@ -358,13 +358,6 @@ class MainWindow(QMainWindow):
         self._border_check.stateChanged.connect(self._on_style_changed)
         toolbar.addWidget(self._border_check)
 
-        self._border_color_btn = QPushButton()
-        self._border_color_btn.setFixedSize(30, 25)
-        self._border_color_btn.setStyleSheet("background-color: #000000;")
-        self._border_color_btn.clicked.connect(self._choose_border_color)
-        self._border_color_btn.setToolTip("Border color")
-        toolbar.addWidget(self._border_color_btn)
-
         self._border_width_spin = QSpinBox()
         self._border_width_spin.setRange(1, 20)
         self._border_width_spin.setValue(2)
@@ -501,7 +494,6 @@ class MainWindow(QMainWindow):
         self._bg_color_btn.setStyleSheet(f"background-color: {self._style.bg_color};")
         self._opacity_spin.setValue(self._style.bg_opacity)
         self._border_check.setChecked(self._style.border_enabled)
-        self._border_color_btn.setStyleSheet(f"background-color: {self._style.border_color};")
         self._border_width_spin.setValue(self._style.border_width)
 
     def _update_recent_menu(self):
@@ -616,74 +608,16 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            # Apply annotations to PDF
-            annotations = self._viewer.get_annotations()
-            for annotation in annotations.all():
-                if annotation.applied_to_pdf:
-                    continue
-
-                page = doc.load_page(annotation.page)
-                style = annotation.style
-                text = str(annotation.number)
-
-                # Convert colors
-                def hex_to_rgb(hex_color):
-                    hex_color = hex_color.lstrip('#')
-                    return tuple(int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
-
-                fg_rgb = hex_to_rgb(style.text_color)
-                bg_rgb = hex_to_rgb(style.bg_color) if style.bg_opacity > 0 else None
-
-                # Calculate rect using font metrics
-                font = fitz.Font("helv")
-                text_width = font.text_length(text, fontsize=style.font_size)
-                text_height = style.font_size
-                padding = style.padding
-
-                # Make rect slightly larger for better centering
-                rect = fitz.Rect(
-                    annotation.x,
-                    annotation.y,
-                    annotation.x + text_width + padding * 2,
-                    annotation.y + text_height + padding * 2
-                )
-
-                # Create FreeText annotation (moveable object with editable text)
-                annot = page.add_freetext_annot(
-                    rect,
-                    text,
-                    fontsize=style.font_size,
-                    fontname="helv",
-                    text_color=fg_rgb,
-                    fill_color=bg_rgb,
-                    align=fitz.TEXT_ALIGN_CENTER,
-                )
-
-                if bg_rgb and style.bg_opacity < 1.0:
-                    annot.set_opacity(style.bg_opacity)
-
-                annot.update()
-
-                # Set border via annotation dictionary if enabled (after update to preserve appearance)
-                if style.border_enabled:
-                    border_rgb = hex_to_rgb(style.border_color)
-                    annot_obj = annot.xref
-                    # Set border array: [horizontal corner radius, vertical corner radius, width]
-                    doc.xref_set_key(annot_obj, "Border", f"[0 0 {style.border_width}]")
-                    # Set Border Style dictionary with width and solid style
-                    doc.xref_set_key(annot_obj, "BS", f"<</W {style.border_width}/S/S>>")
-
-                    # For FreeText, we need to rebuild the appearance stream to include the border
-                    # Get current appearance and modify it
-                    annot.update()  # Regenerate appearance with border settings
-
-                annotation.applied_to_pdf = True
-
-            # Save
+            # Annotations are already in the PDF (direct editing mode)
+            # Just save the document
             doc.save(path, garbage=4, deflate=True)
 
+            # After save with garbage collection, xrefs may have changed
+            # Refresh xrefs to ensure our annotation store matches the PDF
+            self._viewer.refresh_xrefs_after_save()
+
             self._current_file = path
-            annotations.modified = False
+            self._viewer.get_annotations().modified = False
             self._update_title()
             self._statusbar.showMessage(f"Saved: {os.path.basename(path)}")
 
@@ -816,7 +750,6 @@ class MainWindow(QMainWindow):
         self._bg_color_btn.setStyleSheet(f"background-color: {style.bg_color};")
         self._opacity_spin.setValue(style.bg_opacity)
         self._border_check.setChecked(style.border_enabled)
-        self._border_color_btn.setStyleSheet(f"background-color: {style.border_color};")
         self._border_width_spin.setValue(style.border_width)
 
         # Update internal style
@@ -829,7 +762,6 @@ class MainWindow(QMainWindow):
             bg_opacity=style.bg_opacity,
             padding=style.padding,
             border_enabled=style.border_enabled,
-            border_color=style.border_color,
             border_width=style.border_width
         )
 
@@ -977,23 +909,12 @@ class MainWindow(QMainWindow):
             self._bg_color_btn.setStyleSheet(f"background-color: {color.name()};")
             self._on_style_changed()
 
-    def _choose_border_color(self):
-        """Open color picker for border color."""
-        color = QColorDialog.getColor(QColor(self._style.border_color), self)
-        if color.isValid():
-            self._style.border_color = color.name()
-            self._border_color_btn.setStyleSheet(f"background-color: {color.name()};")
-            self._on_style_changed()
-
     def _apply_style_to_selected(self):
         """Apply current style to the selected annotation."""
         # Get selected annotation from viewer
-        selected = self._viewer._selected_annotation
-        if not selected:
+        annotation = self._viewer._selected_annotation
+        if not annotation:
             return
-
-        annotation = selected.annotation
-        old_style = NumberStyle(**annotation.style.to_dict())
 
         # Apply current style settings
         annotation.style.font_family = self._style.font_family
@@ -1002,11 +923,16 @@ class MainWindow(QMainWindow):
         annotation.style.bg_color = self._style.bg_color
         annotation.style.bg_opacity = self._style.bg_opacity
         annotation.style.border_enabled = self._style.border_enabled
-        annotation.style.border_color = self._style.border_color
         annotation.style.border_width = self._style.border_width
+
+        # Update PDF annotation (delete old, create new with new style)
+        self._viewer._delete_pdf_annotation(annotation)
+        self._viewer._add_pdf_annotation(annotation)
+        self._viewer.get_annotations().modified = True
 
         # Refresh display
         self._viewer.refresh_page()
+        self._viewer.select_annotation(annotation)  # Re-select after refresh
         self._update_title()
         self._statusbar.showMessage(f"Applied style to #{annotation.number}")
 
@@ -1093,6 +1019,12 @@ class MainWindow(QMainWindow):
         if msg.clickedButton() == advance_btn:
             # Auto-advance all numbers >= number
             changes = annotations.advance_numbers_from(number, 1)
+
+            # Update PDF annotations for all changed numbers
+            for changed_ann, _, _ in changes:
+                self._viewer._delete_pdf_annotation(changed_ann)
+                self._viewer._add_pdf_annotation(changed_ann)
+
             # Now insert the annotation with the original number
             self._viewer.insert_annotation_at(pdf_x, pdf_y, number)
             self._viewer.refresh_page()
@@ -1169,7 +1101,16 @@ class MainWindow(QMainWindow):
             # Auto-advance all numbers >= new_num
             old_num = annotation.number
             changes = annotations.advance_numbers_from(new_num, 1)
+
+            # Update PDF annotations for all changed numbers
+            for changed_ann, _, _ in changes:
+                self._viewer._delete_pdf_annotation(changed_ann)
+                self._viewer._add_pdf_annotation(changed_ann)
+
             annotation.number = new_num
+            self._viewer._delete_pdf_annotation(annotation)
+            self._viewer._add_pdf_annotation(annotation)
+
             self._viewer.refresh_page()
             self._refresh_annotation_panel()
             self._update_title()
@@ -1185,6 +1126,11 @@ class MainWindow(QMainWindow):
         """Actually change an annotation's number."""
         old_num = annotation.number
         annotation.number = new_num
+
+        # Update PDF annotation (delete old, create new with new number)
+        self._viewer._delete_pdf_annotation(annotation)
+        self._viewer._add_pdf_annotation(annotation)
+        self._viewer.get_annotations().modified = True
 
         self._viewer.refresh_page()
         self._refresh_annotation_panel()
@@ -1205,6 +1151,11 @@ class MainWindow(QMainWindow):
     def _restore_number(self, annotation: NumberAnnotation, number: str):
         """Restore an annotation's number (for undo/redo)."""
         annotation.number = number
+
+        # Update PDF annotation
+        self._viewer._delete_pdf_annotation(annotation)
+        self._viewer._add_pdf_annotation(annotation)
+
         self._viewer.refresh_page()
         self._refresh_annotation_panel()
 
@@ -1232,6 +1183,12 @@ class MainWindow(QMainWindow):
             if msg.clickedButton() == decrease_btn:
                 # First collect changes, then delete and apply
                 changes = annotations.decrease_numbers_from(annotation.number, 1)
+
+                # Update PDF annotations for all changed numbers
+                for changed_ann, _, _ in changes:
+                    self._viewer._delete_pdf_annotation(changed_ann)
+                    self._viewer._add_pdf_annotation(changed_ann)
+
                 self._viewer.delete_annotation(annotation)
                 self._viewer.refresh_page()
                 self._refresh_annotation_panel()

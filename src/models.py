@@ -52,7 +52,6 @@ class NumberStyle:
     bg_opacity: float = 1.0
     padding: int = 4
     border_enabled: bool = False
-    border_color: str = "#000000"
     border_width: int = 2
 
     def to_dict(self) -> dict:
@@ -72,7 +71,7 @@ class NumberAnnotation:
     y: float = 0.0
     number: str = "1"  # String to support decimals like "67.1"
     style: NumberStyle = field(default_factory=NumberStyle)
-    applied_to_pdf: bool = False  # Track if already saved to PDF
+    pdf_annot_xref: int = 0  # PDF annotation xref for direct editing
 
     def __post_init__(self):
         # Ensure number is always a string

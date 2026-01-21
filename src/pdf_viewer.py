@@ -1,17 +1,21 @@
-"""PDF viewer widget with zoom, pan, and annotation support."""
+"""PDF viewer widget with zoom, pan, and annotation support.
+
+This version edits the PDF directly - annotations are added to the PDF document
+and rendered as part of the page, ensuring consistency with other PDF readers.
+"""
 
 import fitz
 from enum import Enum
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
-    QGraphicsRectItem, QGraphicsTextItem, QApplication
+    QGraphicsRectItem, QApplication
 )
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
 from PySide6.QtGui import (
     QPixmap, QImage, QPainter, QColor, QFont, QBrush, QPen,
     QWheelEvent, QMouseEvent, QKeyEvent
 )
-from typing import Optional, Callable
+from typing import Optional
 from .models import NumberAnnotation, NumberStyle, AnnotationStore, parse_number
 
 
@@ -20,165 +24,139 @@ class ToolMode(Enum):
     SELECT = "select"
 
 
-class AnnotationItem(QGraphicsRectItem):
-    """Graphics item for a number annotation."""
+class SelectionOverlay(QGraphicsRectItem):
+    """Overlay to show selection/hover state on annotations."""
 
-    def __init__(self, annotation: NumberAnnotation, scale: float = 1.0):
+    def __init__(self):
         super().__init__()
-        self.annotation = annotation
-        self._scale = scale
         self._selected = False
         self._hovered = False
-        self.setAcceptHoverEvents(True)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.update_display()
-
-    def update_display(self):
-        """Update the visual representation."""
-        style = self.annotation.style
-        text = str(self.annotation.number)
-
-        # Calculate size based on font
-        font = QFont(style.font_family, style.font_size)
-        from PySide6.QtGui import QFontMetrics
-        metrics = QFontMetrics(font)
-        text_rect = metrics.boundingRect(text)
-
-        padding = style.padding
-        width = text_rect.width() + padding * 2
-        height = text_rect.height() + padding * 2
-
-        # Position in scene coordinates
-        x = self.annotation.x * self._scale
-        y = self.annotation.y * self._scale
-        w = width * self._scale
-        h = height * self._scale
-
-        self.setRect(0, 0, w, h)
-        self.setPos(x, y)
-
-        # Store original size for PDF export
-        self._pdf_width = width
-        self._pdf_height = height
-
-    def set_scale(self, scale: float):
-        self._scale = scale
-        self.update_display()
-
-    def paint(self, painter, option, widget):
-        style = self.annotation.style
-        rect = self.rect()
-
-        # Background
-        bg_color = QColor(style.bg_color)
-        bg_color.setAlphaF(style.bg_opacity)
-        painter.fillRect(rect, bg_color)
-
-        # Style border (if enabled)
-        if style.border_enabled:
-            border_width = max(1, int(style.border_width * self._scale))
-            painter.setPen(QPen(QColor(style.border_color), border_width))
-            painter.drawRect(rect.adjusted(border_width/2, border_width/2, -border_width/2, -border_width/2))
-
-        # Selection/hover border (drawn on top)
-        if self._selected:
-            painter.setPen(QPen(QColor("#FF0000"), 2))
-            painter.drawRect(rect)
-        elif self._hovered:
-            painter.setPen(QPen(QColor("#0078D7"), 1))
-            painter.drawRect(rect)
-
-        # Text
-        font = QFont(style.font_family, int(style.font_size * self._scale))
-        painter.setFont(font)
-        painter.setPen(QColor(style.text_color))
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(self.annotation.number))
+        self.setPen(QPen(Qt.PenStyle.NoPen))
+        self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
 
     def set_selected(self, selected: bool):
         self._selected = selected
         self.update()
 
-    def hoverEnterEvent(self, event):
-        self._hovered = True
+    def set_hovered(self, hovered: bool):
+        self._hovered = hovered
         self.update()
 
-    def hoverLeaveEvent(self, event):
-        self._hovered = False
-        self.update()
+    def paint(self, painter, option, widget):
+        if self._selected:
+            painter.setPen(QPen(QColor("#FF0000"), 2))
+            painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+            painter.drawRect(self.rect())
+        elif self._hovered:
+            painter.setPen(QPen(QColor("#0078D7"), 1, Qt.PenStyle.DashLine))
+            painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+            painter.drawRect(self.rect())
 
 
-class NumberPreviewItem(QGraphicsRectItem):
-    """Preview item shown at cursor when inserting numbers."""
+class PDFPreviewItem(QGraphicsPixmapItem):
+    """Preview item that shows actual PDF-rendered annotation."""
 
     def __init__(self, style: NumberStyle, number: str, scale: float = 1.0):
         super().__init__()
         self.style = style
         self.number = str(number)
         self._scale = scale
+        self._width = 0
+        self._height = 0
         self.setOpacity(0.7)
-        self.update_display()
+        self._render_preview()
 
-    def update_display(self):
+    def _render_preview(self):
+        """Render a preview using actual PDF annotation."""
         text = str(self.number)
-        font = QFont(self.style.font_family, self.style.font_size)
-        from PySide6.QtGui import QFontMetrics
-        metrics = QFontMetrics(font)
-        text_rect = metrics.boundingRect(text)
+        style = self.style
 
-        padding = self.style.padding
-        width = (text_rect.width() + padding * 2) * self._scale
-        height = (text_rect.height() + padding * 2) * self._scale
+        # Calculate dimensions
+        font = fitz.Font("helv")
+        text_width = font.text_length(text, fontsize=style.font_size)
+        text_height = style.font_size
+        padding = style.padding
 
-        self.setRect(-width / 2, -height / 2, width, height)
+        width = text_width + padding * 2
+        height = text_height + padding * 2
+
+        # Create temporary PDF with annotation
+        doc = fitz.open()
+        page = doc.new_page(width=width + 10, height=height + 10)
+
+        rect = fitz.Rect(5, 5, 5 + width, 5 + height)
+
+        def hex_to_rgb(hex_color):
+            hex_color = hex_color.lstrip('#')
+            return tuple(int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+        fg_rgb = hex_to_rgb(style.text_color)
+        bg_rgb = hex_to_rgb(style.bg_color) if style.bg_opacity > 0 else None
+
+        annot = page.add_freetext_annot(
+            rect,
+            text,
+            fontsize=style.font_size,
+            fontname="helv",
+            text_color=fg_rgb,
+            fill_color=bg_rgb,
+            align=fitz.TEXT_ALIGN_CENTER,
+        )
+
+        if bg_rgb and style.bg_opacity < 1.0:
+            annot.set_opacity(style.bg_opacity)
+
+        annot.update()
+
+        if style.border_enabled:
+            annot_xref = annot.xref
+            doc.xref_set_key(annot_xref, "Border", f"[0 0 {style.border_width}]")
+            doc.xref_set_key(annot_xref, "BS", f"<</W {style.border_width}/S/S>>")
+            annot.update()
+
+        # Render to pixmap
+        mat = fitz.Matrix(self._scale, self._scale)
+        pix = page.get_pixmap(matrix=mat, clip=fitz.Rect(0, 0, width + 10, height + 10))
+
+        if pix.alpha:
+            fmt = QImage.Format.Format_RGBA8888
+        else:
+            fmt = QImage.Format.Format_RGB888
+
+        img = QImage(pix.samples, pix.width, pix.height, pix.stride, fmt)
+        pixmap = QPixmap.fromImage(img.copy())
+
+        doc.close()
+
+        self.setPixmap(pixmap)
+        self._width = pixmap.width()
+        self._height = pixmap.height()
+        # Center the pixmap on the cursor position
+        self.setOffset(-self._width / 2, -self._height / 2)
 
     def set_style(self, style: NumberStyle, number: str):
         self.style = style
         self.number = str(number)
-        self.update_display()
-        self.update()
+        self._render_preview()
 
     def set_scale(self, scale: float):
         self._scale = scale
-        self.update_display()
-
-    def paint(self, painter, option, widget):
-        rect = self.rect()
-
-        # Background
-        bg_color = QColor(self.style.bg_color)
-        bg_color.setAlphaF(self.style.bg_opacity * 0.7)
-        painter.fillRect(rect, bg_color)
-
-        # Border (if enabled)
-        if self.style.border_enabled:
-            border_width = max(1, int(self.style.border_width * self._scale))
-            border_color = QColor(self.style.border_color)
-            border_color.setAlphaF(0.7)
-            painter.setPen(QPen(border_color, border_width))
-            painter.drawRect(rect.adjusted(border_width/2, border_width/2, -border_width/2, -border_width/2))
-
-        # Text
-        font = QFont(self.style.font_family, int(self.style.font_size * self._scale))
-        painter.setFont(font)
-        text_color = QColor(self.style.text_color)
-        text_color.setAlphaF(0.7)
-        painter.setPen(text_color)
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(self.number))
+        self._render_preview()
 
 
 class PDFViewer(QGraphicsView):
-    """PDF viewer with zoom, pan, and annotation support."""
+    """PDF viewer with direct PDF annotation editing."""
 
     # Signals
-    page_changed = Signal(int)  # current page index
-    zoom_changed = Signal(float)  # zoom factor
+    page_changed = Signal(int)
+    zoom_changed = Signal(float)
     annotation_selected = Signal(object)  # NumberAnnotation or None
     annotation_added = Signal(object)  # NumberAnnotation
     annotation_moved = Signal(object, float, float)  # annotation, old_x, old_y
     annotation_deleted = Signal(object)  # NumberAnnotation
-    duplicate_number_requested = Signal(str, float, float)  # number, pdf_x, pdf_y
-    edit_annotation_requested = Signal(object)  # NumberAnnotation (double-click)
-    tool_changed = Signal(str)  # tool mode name
+    duplicate_number_requested = Signal(str, float, float)
+    edit_annotation_requested = Signal(object)
+    tool_changed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -194,22 +172,22 @@ class PDFViewer(QGraphicsView):
         self._zoom = 1.0
         self._min_zoom = 0.1
         self._max_zoom = 5.0
-        self._fit_mode = True  # Fit to view on resize
+        self._fit_mode = True
 
         # Interaction state
         self._panning = False
         self._pan_start = QPointF()
-        self._dragging_annotation: Optional[AnnotationItem] = None
+        self._dragging_annotation: Optional[NumberAnnotation] = None
         self._drag_start_pos = QPointF()
         self._drag_annotation_start = QPointF()
 
-        # Annotations
+        # Annotations (our tracking, synced with PDF)
         self._annotations = AnnotationStore()
-        self._annotation_items: dict[str, AnnotationItem] = {}
-        self._selected_annotation: Optional[AnnotationItem] = None
+        self._selected_annotation: Optional[NumberAnnotation] = None
+        self._selection_overlay: Optional[SelectionOverlay] = None
 
         # Preview
-        self._preview_item: Optional[NumberPreviewItem] = None
+        self._preview_item: Optional[PDFPreviewItem] = None
         self._current_style = NumberStyle()
         self._next_number = "1"
         self._tool_mode = ToolMode.INSERT
@@ -231,7 +209,6 @@ class PDFViewer(QGraphicsView):
             self._doc = fitz.open(path)
             self._current_page = 0
             self._annotations.clear()
-            self._annotation_items.clear()
             self._selected_annotation = None
             self._render_page()
             return True
@@ -249,8 +226,8 @@ class PDFViewer(QGraphicsView):
             self._doc = None
         self._scene.clear()
         self._page_pixmap = None
-        self._preview_item = None  # Reset since scene.clear() deleted it
-        self._annotation_items.clear()
+        self._preview_item = None
+        self._selection_overlay = None
         self._annotations.clear()
         self._selected_annotation = None
 
@@ -278,7 +255,7 @@ class PDFViewer(QGraphicsView):
             self.go_to_page(self._current_page - 1)
 
     def _render_page(self):
-        """Render the current page."""
+        """Render the current page from PDF (includes annotations)."""
         if not self._doc:
             return
 
@@ -290,9 +267,9 @@ class PDFViewer(QGraphicsView):
             page_rect = page.rect
             zoom_x = view_rect.width() / page_rect.width
             zoom_y = view_rect.height() / page_rect.height
-            self._zoom = min(zoom_x, zoom_y) * 0.95  # 95% to leave margin
+            self._zoom = min(zoom_x, zoom_y) * 0.95
 
-        # Render page
+        # Render page WITH annotations
         mat = fitz.Matrix(self._zoom, self._zoom)
         pix = page.get_pixmap(matrix=mat)
 
@@ -305,17 +282,21 @@ class PDFViewer(QGraphicsView):
         img = QImage(pix.samples, pix.width, pix.height, pix.stride, fmt)
         pixmap = QPixmap.fromImage(img)
 
-        # Update scene (clear also deletes preview item and annotation items)
+        # Update scene
         self._scene.clear()
-        self._preview_item = None  # Reset reference since scene.clear() deleted it
-        self._selected_annotation = None  # Reset since items are deleted
+        self._preview_item = None
+        self._selection_overlay = None
         self._page_pixmap = self._scene.addPixmap(pixmap)
         self._scene.setSceneRect(0, 0, pixmap.width(), pixmap.height())
 
-        # Re-add annotations
-        self._annotation_items.clear()
-        for annotation in self._annotations.get_for_page(self._current_page):
-            self._add_annotation_item(annotation)
+        # Create selection overlay
+        self._selection_overlay = SelectionOverlay()
+        self._selection_overlay.setVisible(False)
+        self._scene.addItem(self._selection_overlay)
+
+        # Update selection overlay if we have a selected annotation
+        if self._selected_annotation:
+            self._update_selection_overlay(self._selected_annotation)
 
         # Re-create preview if in insert mode
         if self._tool_mode == ToolMode.INSERT:
@@ -323,17 +304,35 @@ class PDFViewer(QGraphicsView):
 
         self.zoom_changed.emit(self._zoom)
 
-    def _add_annotation_item(self, annotation: NumberAnnotation):
-        """Add an annotation item to the scene."""
-        item = AnnotationItem(annotation, self._zoom)
-        self._scene.addItem(item)
-        self._annotation_items[annotation.id] = item
+    def _update_selection_overlay(self, annotation: NumberAnnotation):
+        """Update the selection overlay to match an annotation's position."""
+        if not self._selection_overlay:
+            return
+
+        # Calculate rect from annotation
+        style = annotation.style
+        text = str(annotation.number)
+
+        font = fitz.Font("helv")
+        text_width = font.text_length(text, fontsize=style.font_size)
+        text_height = style.font_size
+        padding = style.padding
+
+        x = annotation.x * self._zoom
+        y = annotation.y * self._zoom
+        w = (text_width + padding * 2) * self._zoom
+        h = (text_height + padding * 2) * self._zoom
+
+        self._selection_overlay.setRect(0, 0, w, h)
+        self._selection_overlay.setPos(x, y)
+        self._selection_overlay.set_selected(True)
+        self._selection_overlay.setVisible(True)
 
     def _create_preview(self):
         """Create or update the preview item."""
         if self._preview_item:
             self._scene.removeItem(self._preview_item)
-        self._preview_item = NumberPreviewItem(self._current_style, self._next_number, self._zoom)
+        self._preview_item = PDFPreviewItem(self._current_style, self._next_number, self._zoom)
         self._preview_item.setVisible(False)
         self._scene.addItem(self._preview_item)
 
@@ -353,9 +352,209 @@ class PDFViewer(QGraphicsView):
         return self._annotations
 
     def set_annotations(self, annotations: AnnotationStore):
-        """Replace all annotations."""
+        """Replace all annotations - rebuilds PDF annotations."""
         self._annotations = annotations
+        # Rebuild all PDF annotations
+        self._rebuild_pdf_annotations()
         self._render_page()
+
+    def _rebuild_pdf_annotations(self):
+        """Rebuild all PDF annotations from our annotation store."""
+        if not self._doc:
+            return
+
+        # Remove all existing FreeText annotations
+        for page_num in range(self._doc.page_count):
+            page = self._doc.load_page(page_num)
+            annots_to_delete = []
+            for annot in page.annots():
+                if annot.type[0] == fitz.PDF_ANNOT_FREE_TEXT:
+                    annots_to_delete.append(annot)
+            for annot in annots_to_delete:
+                page.delete_annot(annot)
+
+        # Add all annotations from store
+        for annotation in self._annotations.all():
+            self._add_pdf_annotation(annotation)
+
+    def _add_pdf_annotation(self, annotation: NumberAnnotation) -> int:
+        """Add an annotation to the PDF and return its xref."""
+        if not self._doc:
+            return 0
+
+        page = self._doc.load_page(annotation.page)
+        style = annotation.style
+        text = str(annotation.number)
+
+        # Calculate rect
+        font = fitz.Font("helv")
+        text_width = font.text_length(text, fontsize=style.font_size)
+        text_height = style.font_size
+        padding = style.padding
+
+        rect = fitz.Rect(
+            annotation.x,
+            annotation.y,
+            annotation.x + text_width + padding * 2,
+            annotation.y + text_height + padding * 2
+        )
+
+        # Convert colors
+        def hex_to_rgb(hex_color):
+            hex_color = hex_color.lstrip('#')
+            return tuple(int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+        fg_rgb = hex_to_rgb(style.text_color)
+        bg_rgb = hex_to_rgb(style.bg_color) if style.bg_opacity > 0 else None
+
+        # Create annotation
+        annot = page.add_freetext_annot(
+            rect,
+            text,
+            fontsize=style.font_size,
+            fontname="helv",
+            text_color=fg_rgb,
+            fill_color=bg_rgb,
+            align=fitz.TEXT_ALIGN_CENTER,
+        )
+
+        if bg_rgb and style.bg_opacity < 1.0:
+            annot.set_opacity(style.bg_opacity)
+
+        annot.update()
+
+        annot_xref = annot.xref
+
+        # Explicitly set /Q (quadding) to 1 for center alignment
+        # This helps ensure Acrobat respects the alignment when editing
+        self._doc.xref_set_key(annot_xref, "Q", "1")
+
+        # Set border if enabled
+        if style.border_enabled:
+            self._doc.xref_set_key(annot_xref, "Border", f"[0 0 {style.border_width}]")
+            self._doc.xref_set_key(annot_xref, "BS", f"<</W {style.border_width}/S/S>>")
+            annot.update()
+
+        annotation.pdf_annot_xref = annot_xref
+        return annot.xref
+
+    def _delete_pdf_annotation(self, annotation: NumberAnnotation):
+        """Delete an annotation from the PDF."""
+        if not self._doc:
+            return
+
+        page = self._doc.load_page(annotation.page)
+
+        # Calculate expected rect for position-based matching
+        style = annotation.style
+        text = str(annotation.number)
+        font = fitz.Font("helv")
+        text_width = font.text_length(text, fontsize=style.font_size)
+        text_height = style.font_size
+        padding = style.padding
+
+        expected_rect = fitz.Rect(
+            annotation.x,
+            annotation.y,
+            annotation.x + text_width + padding * 2,
+            annotation.y + text_height + padding * 2
+        )
+
+        annot_to_delete = None
+
+        # Try to find by xref first
+        if annotation.pdf_annot_xref != 0:
+            for annot in page.annots():
+                if annot.xref == annotation.pdf_annot_xref:
+                    annot_to_delete = annot
+                    break
+
+        # If not found by xref, try to find by position (within tolerance)
+        if annot_to_delete is None:
+            for annot in page.annots():
+                if annot.type[0] == fitz.PDF_ANNOT_FREE_TEXT:
+                    annot_rect = annot.rect
+                    # Check if rectangles are close enough (within 2 pixels)
+                    if (abs(annot_rect.x0 - expected_rect.x0) < 2 and
+                        abs(annot_rect.y0 - expected_rect.y0) < 2 and
+                        abs(annot_rect.x1 - expected_rect.x1) < 2 and
+                        abs(annot_rect.y1 - expected_rect.y1) < 2):
+                        annot_to_delete = annot
+                        break
+
+        if annot_to_delete:
+            page.delete_annot(annot_to_delete)
+
+    def _move_pdf_annotation(self, annotation: NumberAnnotation, old_x: float, old_y: float):
+        """Move an annotation in the PDF by updating its rect (preserves appearance)."""
+        if not self._doc:
+            return False
+
+        page = self._doc.load_page(annotation.page)
+
+        # Calculate old rect to find the annotation
+        style = annotation.style
+        text = str(annotation.number)
+        font = fitz.Font("helv")
+        text_width = font.text_length(text, fontsize=style.font_size)
+        text_height = style.font_size
+        padding = style.padding
+
+        width = text_width + padding * 2
+        height = text_height + padding * 2
+
+        old_rect = fitz.Rect(old_x, old_y, old_x + width, old_y + height)
+
+        # Find the annotation
+        annot_to_move = None
+
+        # Try by xref first
+        if annotation.pdf_annot_xref != 0:
+            for annot in page.annots():
+                if annot.xref == annotation.pdf_annot_xref:
+                    annot_to_move = annot
+                    break
+
+        # Fallback to position matching
+        if annot_to_move is None:
+            for annot in page.annots():
+                if annot.type[0] == fitz.PDF_ANNOT_FREE_TEXT:
+                    annot_rect = annot.rect
+                    if (abs(annot_rect.x0 - old_rect.x0) < 2 and
+                        abs(annot_rect.y0 - old_rect.y0) < 2 and
+                        abs(annot_rect.x1 - old_rect.x1) < 2 and
+                        abs(annot_rect.y1 - old_rect.y1) < 2):
+                        annot_to_move = annot
+                        break
+
+        if annot_to_move:
+            # Calculate new rect
+            new_rect = fitz.Rect(
+                annotation.x,
+                annotation.y,
+                annotation.x + width,
+                annotation.y + height
+            )
+            annot_to_move.set_rect(new_rect)
+            annot_to_move.update()
+            return True
+
+        return False
+
+    def set_tool_mode(self, mode: ToolMode):
+        """Set the current tool mode."""
+        self._tool_mode = mode
+        if self._preview_item:
+            self._preview_item.setVisible(False)
+        if mode == ToolMode.SELECT:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.tool_changed.emit(mode.value)
+
+    def get_tool_mode(self) -> ToolMode:
+        return self._tool_mode
+
+    def set_insert_mode(self, enabled: bool):
+        self.set_tool_mode(ToolMode.INSERT if enabled else ToolMode.SELECT)
 
     def zoom_in(self):
         self.set_zoom(self._zoom * 1.25)
@@ -371,7 +570,6 @@ class PDFViewer(QGraphicsView):
         self.set_zoom(1.0)
 
     def set_zoom(self, zoom: float):
-        """Set zoom level."""
         self._zoom = max(self._min_zoom, min(self._max_zoom, zoom))
         self._fit_mode = False
         self._render_page()
@@ -379,27 +577,8 @@ class PDFViewer(QGraphicsView):
     def get_zoom(self) -> float:
         return self._zoom
 
-    def set_tool_mode(self, mode: ToolMode):
-        """Set the current tool mode."""
-        self._tool_mode = mode
-        if self._preview_item:
-            self._preview_item.setVisible(False)
-        if mode == ToolMode.SELECT:
-            self.setCursor(Qt.CursorShape.ArrowCursor)
-        self.tool_changed.emit(mode.value)
-
-    def get_tool_mode(self) -> ToolMode:
-        """Get the current tool mode."""
-        return self._tool_mode
-
-    def set_insert_mode(self, enabled: bool):
-        """Enable/disable insert mode (legacy method)."""
-        self.set_tool_mode(ToolMode.INSERT if enabled else ToolMode.SELECT)
-
     def wheelEvent(self, event: QWheelEvent):
-        """Handle mouse wheel for zooming."""
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            # Zoom
             delta = event.angleDelta().y()
             if delta > 0:
                 self.zoom_in()
@@ -407,12 +586,10 @@ class PDFViewer(QGraphicsView):
                 self.zoom_out()
             event.accept()
         else:
-            # Scroll
             super().wheelEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.MiddleButton:
-            # Start panning
             self._panning = True
             self._pan_start = event.position()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -421,19 +598,14 @@ class PDFViewer(QGraphicsView):
 
         if event.button() == Qt.MouseButton.LeftButton:
             scene_pos = self.mapToScene(event.position().toPoint())
-            item = self._scene.itemAt(scene_pos, self.transform())
 
-            # Check if clicked on annotation
-            if isinstance(item, AnnotationItem):
-                # In SELECT mode: select and prepare for dragging
-                # In INSERT mode: also allow selecting existing annotations
-                self._select_annotation(item)
-                self._dragging_annotation = item
+            # Check if clicked on an annotation
+            annotation = self._find_annotation_at(scene_pos)
+            if annotation:
+                self._select_annotation(annotation)
+                self._dragging_annotation = annotation
                 self._drag_start_pos = scene_pos
-                self._drag_annotation_start = QPointF(
-                    item.annotation.x,
-                    item.annotation.y
-                )
+                self._drag_annotation_start = QPointF(annotation.x, annotation.y)
                 event.accept()
                 return
 
@@ -443,7 +615,6 @@ class PDFViewer(QGraphicsView):
 
             # Insert new annotation only in INSERT mode
             if self._tool_mode == ToolMode.INSERT and self._page_pixmap:
-                # Check if click is on the page
                 page_rect = self._page_pixmap.boundingRect()
                 if page_rect.contains(scene_pos):
                     self._insert_annotation(scene_pos)
@@ -451,7 +622,6 @@ class PDFViewer(QGraphicsView):
                     return
 
         if event.button() == Qt.MouseButton.RightButton:
-            # Deselect
             if self._selected_annotation:
                 self._deselect_annotation()
             event.accept()
@@ -460,17 +630,13 @@ class PDFViewer(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        """Handle double-click for editing annotations."""
         if event.button() == Qt.MouseButton.LeftButton:
             scene_pos = self.mapToScene(event.position().toPoint())
-            item = self._scene.itemAt(scene_pos, self.transform())
-
-            if isinstance(item, AnnotationItem):
-                # Emit edit request
-                self.edit_annotation_requested.emit(item.annotation)
+            annotation = self._find_annotation_at(scene_pos)
+            if annotation:
+                self.edit_annotation_requested.emit(annotation)
                 event.accept()
                 return
-
         super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
@@ -487,7 +653,6 @@ class PDFViewer(QGraphicsView):
             return
 
         if self._dragging_annotation:
-            # Move annotation
             scene_pos = self.mapToScene(event.position().toPoint())
             delta = scene_pos - self._drag_start_pos
 
@@ -498,14 +663,14 @@ class PDFViewer(QGraphicsView):
             new_x = self._drag_annotation_start.x() + pdf_delta_x
             new_y = self._drag_annotation_start.y() + pdf_delta_y
 
-            # Update annotation position
-            self._dragging_annotation.annotation.x = new_x
-            self._dragging_annotation.annotation.y = new_y
-            self._dragging_annotation.update_display()
+            # Update annotation position (visual feedback via selection overlay)
+            self._dragging_annotation.x = new_x
+            self._dragging_annotation.y = new_y
+            self._update_selection_overlay(self._dragging_annotation)
             event.accept()
             return
 
-        # Update preview position (only in INSERT mode)
+        # Update preview position
         if self._tool_mode == ToolMode.INSERT and self._preview_item is not None:
             try:
                 scene_pos = self.mapToScene(event.position().toPoint())
@@ -517,7 +682,6 @@ class PDFViewer(QGraphicsView):
                     self._preview_item.setVisible(False)
                     self.setCursor(Qt.CursorShape.ArrowCursor)
             except RuntimeError:
-                # Item was deleted, reset reference
                 self._preview_item = None
 
         super().mouseMoveEvent(event)
@@ -530,13 +694,19 @@ class PDFViewer(QGraphicsView):
             return
 
         if event.button() == Qt.MouseButton.LeftButton and self._dragging_annotation:
-            # Emit move signal for undo
             old_x = self._drag_annotation_start.x()
             old_y = self._drag_annotation_start.y()
-            ann = self._dragging_annotation.annotation
+            ann = self._dragging_annotation
 
             if old_x != ann.x or old_y != ann.y:
+                # Move PDF annotation in place (preserves appearance)
+                if not self._move_pdf_annotation(ann, old_x, old_y):
+                    # Fallback to delete/recreate if move failed
+                    self._delete_pdf_annotation(ann)
+                    self._add_pdf_annotation(ann)
                 self._annotations.modified = True
+                self._render_page()
+                self._select_annotation(ann)  # Re-select after re-render
                 self.annotation_moved.emit(ann, old_x, old_y)
 
             self._dragging_annotation = None
@@ -565,54 +735,71 @@ class PDFViewer(QGraphicsView):
         if self._fit_mode and self._doc:
             self._render_page()
 
-    def _select_annotation(self, item: AnnotationItem):
+    def _find_annotation_at(self, scene_pos: QPointF) -> Optional[NumberAnnotation]:
+        """Find annotation at the given scene position."""
+        pdf_x = scene_pos.x() / self._zoom
+        pdf_y = scene_pos.y() / self._zoom
+
+        for annotation in self._annotations.get_for_page(self._current_page):
+            style = annotation.style
+            text = str(annotation.number)
+
+            font = fitz.Font("helv")
+            text_width = font.text_length(text, fontsize=style.font_size)
+            text_height = style.font_size
+            padding = style.padding
+
+            rect = QRectF(
+                annotation.x,
+                annotation.y,
+                text_width + padding * 2,
+                text_height + padding * 2
+            )
+
+            if rect.contains(pdf_x, pdf_y):
+                return annotation
+
+        return None
+
+    def _select_annotation(self, annotation: NumberAnnotation):
         """Select an annotation."""
-        if self._selected_annotation:
-            self._selected_annotation.set_selected(False)
-        self._selected_annotation = item
-        item.set_selected(True)
-        self.annotation_selected.emit(item.annotation)
+        self._selected_annotation = annotation
+        self._update_selection_overlay(annotation)
+        self.annotation_selected.emit(annotation)
 
     def _deselect_annotation(self):
         """Deselect current annotation."""
-        if self._selected_annotation:
-            try:
-                self._selected_annotation.set_selected(False)
-            except RuntimeError:
-                # Item was already deleted
-                pass
-            self._selected_annotation = None
-            self.annotation_selected.emit(None)
+        self._selected_annotation = None
+        if self._selection_overlay:
+            self._selection_overlay.setVisible(False)
+        self.annotation_selected.emit(None)
 
     def _insert_annotation(self, scene_pos: QPointF):
         """Insert a new annotation at the given scene position."""
-        # Convert to PDF coordinates
         pdf_x = scene_pos.x() / self._zoom
         pdf_y = scene_pos.y() / self._zoom
 
         # Center on click
-        # Get size from style
-        font = QFont(self._current_style.font_family, self._current_style.font_size)
-        from PySide6.QtGui import QFontMetrics
-        metrics = QFontMetrics(font)
-        text_rect = metrics.boundingRect(str(self._next_number))
-        width = text_rect.width() + self._current_style.padding * 2
-        height = text_rect.height() + self._current_style.padding * 2
+        font = fitz.Font("helv")
+        text_width = font.text_length(str(self._next_number), fontsize=self._current_style.font_size)
+        text_height = self._current_style.font_size
+        padding = self._current_style.padding
+
+        width = text_width + padding * 2
+        height = text_height + padding * 2
 
         pdf_x -= width / 2
         pdf_y -= height / 2
 
         # Check for duplicate
         if self._annotations.has_number(self._next_number):
-            # Emit signal for main window to handle
             self.duplicate_number_requested.emit(self._next_number, pdf_x, pdf_y)
             return
 
         self._do_insert_annotation(pdf_x, pdf_y, self._next_number)
 
     def _do_insert_annotation(self, pdf_x: float, pdf_y: float, number: str):
-        """Actually insert an annotation at the given PDF coordinates."""
-        # Create annotation
+        """Actually insert an annotation."""
         annotation = NumberAnnotation(
             page=self._current_page,
             x=pdf_x,
@@ -627,20 +814,22 @@ class PDFViewer(QGraphicsView):
                 'bg_opacity': self._current_style.bg_opacity,
                 'padding': self._current_style.padding,
                 'border_enabled': self._current_style.border_enabled,
-                'border_color': self._current_style.border_color,
                 'border_width': self._current_style.border_width,
             })
         )
 
+        # Add to PDF and store
+        self._add_pdf_annotation(annotation)
         self._annotations.add(annotation)
-        self._add_annotation_item(annotation)
 
-        # Auto-increment (only for whole numbers)
+        # Re-render to show the annotation
+        self._render_page()
+
+        # Auto-increment
         main, sub = parse_number(number)
         if sub == 0:
             self._next_number = str(main + 1)
         else:
-            # For sub-numbers, just increment the sub
             self._next_number = f"{main}.{sub + 1}"
 
         if self._preview_item:
@@ -649,10 +838,7 @@ class PDFViewer(QGraphicsView):
         self.annotation_added.emit(annotation)
 
     def insert_annotation_at(self, pdf_x: float, pdf_y: float, number: str):
-        """Insert an annotation at the given position with the given number.
-
-        Used by main window when handling duplicate number resolution.
-        """
+        """Insert an annotation at the given position with the given number."""
         self._do_insert_annotation(pdf_x, pdf_y, number)
 
     def _delete_selected_annotation(self):
@@ -660,38 +846,53 @@ class PDFViewer(QGraphicsView):
         if not self._selected_annotation:
             return
 
-        annotation = self._selected_annotation.annotation
+        annotation = self._selected_annotation
 
-        # Remove from scene and store
-        self._scene.removeItem(self._selected_annotation)
-        del self._annotation_items[annotation.id]
+        # Remove from PDF
+        self._delete_pdf_annotation(annotation)
+
+        # Remove from store
         self._annotations.remove(annotation.id)
 
         self._selected_annotation = None
+        self._render_page()
+
         self.annotation_deleted.emit(annotation)
         self.annotation_selected.emit(None)
 
     def delete_annotation(self, annotation: NumberAnnotation):
         """Delete a specific annotation."""
-        if annotation.id in self._annotation_items:
-            item = self._annotation_items[annotation.id]
-            self._scene.removeItem(item)
-            del self._annotation_items[annotation.id]
-
-            if self._selected_annotation == item:
-                self._selected_annotation = None
-                self.annotation_selected.emit(None)
-
+        self._delete_pdf_annotation(annotation)
         self._annotations.remove(annotation.id)
+
+        if self._selected_annotation == annotation:
+            self._selected_annotation = None
+            self.annotation_selected.emit(None)
+
+        self._render_page()
 
     def add_annotation(self, annotation: NumberAnnotation):
         """Add an annotation (for undo/redo)."""
+        self._add_pdf_annotation(annotation)
         self._annotations.add(annotation)
-        if annotation.page == self._current_page:
-            self._add_annotation_item(annotation)
+        self._render_page()
+
+    def refresh_page(self):
+        """Refresh the current page display."""
+        self._render_page()
+
+    def select_annotation(self, annotation: NumberAnnotation):
+        """Select a specific annotation by its data."""
+        self._select_annotation(annotation)
+
+    def center_on_annotation(self, annotation: NumberAnnotation):
+        """Center the view on an annotation."""
+        x = annotation.x * self._zoom
+        y = annotation.y * self._zoom
+        self.centerOn(x, y)
 
     def get_page_image(self, page: int, scale: float = 2.0) -> Optional[QImage]:
-        """Get a page as QImage with annotations rendered."""
+        """Get a page as QImage (rendered from PDF with annotations)."""
         if not self._doc or page < 0 or page >= self._doc.page_count:
             return None
 
@@ -704,60 +905,38 @@ class PDFViewer(QGraphicsView):
         else:
             fmt = QImage.Format.Format_RGB888
 
-        img = QImage(pix.samples, pix.width, pix.height, pix.stride, fmt).copy()
+        return QImage(pix.samples, pix.width, pix.height, pix.stride, fmt).copy()
 
-        # Draw annotations
-        painter = QPainter(img)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    def refresh_xrefs_after_save(self):
+        """Refresh annotation xrefs after saving (xrefs may change during save)."""
+        if not self._doc:
+            return
 
-        for annotation in self._annotations.get_for_page(page):
+        for annotation in self._annotations.all():
+            # Calculate expected rect
             style = annotation.style
             text = str(annotation.number)
+            font = fitz.Font("helv")
+            text_width = font.text_length(text, fontsize=style.font_size)
+            text_height = style.font_size
+            padding = style.padding
 
-            # Calculate position and size
-            font = QFont(style.font_family, int(style.font_size * scale))
-            painter.setFont(font)
-            metrics = painter.fontMetrics()
-            text_rect = metrics.boundingRect(text)
+            expected_rect = fitz.Rect(
+                annotation.x,
+                annotation.y,
+                annotation.x + text_width + padding * 2,
+                annotation.y + text_height + padding * 2
+            )
 
-            padding = int(style.padding * scale)
-            x = int(annotation.x * scale)
-            y = int(annotation.y * scale)
-            w = text_rect.width() + padding * 2
-            h = text_rect.height() + padding * 2
-
-            rect = QRectF(x, y, w, h)
-
-            # Background
-            bg_color = QColor(style.bg_color)
-            bg_color.setAlphaF(style.bg_opacity)
-            painter.fillRect(rect, bg_color)
-
-            # Border (if enabled)
-            if style.border_enabled:
-                border_width = max(1, int(style.border_width * scale))
-                painter.setPen(QPen(QColor(style.border_color), border_width))
-                painter.drawRect(rect.adjusted(border_width/2, border_width/2, -border_width/2, -border_width/2))
-
-            # Text
-            painter.setPen(QColor(style.text_color))
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
-
-        painter.end()
-        return img
-
-    def refresh_page(self):
-        """Refresh the current page display."""
-        self._render_page()
-
-    def select_annotation(self, annotation: NumberAnnotation):
-        """Select a specific annotation by its data."""
-        if annotation.id in self._annotation_items:
-            item = self._annotation_items[annotation.id]
-            self._select_annotation(item)
-
-    def center_on_annotation(self, annotation: NumberAnnotation):
-        """Center the view on an annotation."""
-        if annotation.id in self._annotation_items:
-            item = self._annotation_items[annotation.id]
-            self.centerOn(item)
+            # Find matching annotation in PDF
+            page = self._doc.load_page(annotation.page)
+            for annot in page.annots():
+                if annot.type[0] == fitz.PDF_ANNOT_FREE_TEXT:
+                    annot_rect = annot.rect
+                    # Check if rectangles match (within 2 pixels)
+                    if (abs(annot_rect.x0 - expected_rect.x0) < 2 and
+                        abs(annot_rect.y0 - expected_rect.y0) < 2 and
+                        abs(annot_rect.x1 - expected_rect.x1) < 2 and
+                        abs(annot_rect.y1 - expected_rect.y1) < 2):
+                        annotation.pdf_annot_xref = annot.xref
+                        break
