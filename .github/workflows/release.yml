@@ -17,8 +17,8 @@ jobs:
             artifact_name: NapisyTWON-Windows.exe
             pyinstaller_args: --onefile --windowed --name "NapisyTWON" --icon "resources/icon.ico" --add-data "resources;resources"
           - os: macos-latest
-            artifact_name: NapisyTWON-macOS
-            pyinstaller_args: --onefile --windowed --name "NapisyTWON" --icon "resources/icon.png" --add-data "resources:resources"
+            artifact_name: NapisyTWON-macOS.zip
+            pyinstaller_args: --windowed --name "NapisyTWON" --icon "resources/icon.png" --add-data "resources:resources"
           - os: ubuntu-latest
             artifact_name: NapisyTWON-Linux
             pyinstaller_args: --onefile --name "NapisyTWON" --add-data "resources:resources"
@@ -55,10 +55,10 @@ jobs:
         run: |
           move dist\NapisyTWON.exe dist\${{ matrix.artifact_name }}
 
-      - name: Rename artifact (macOS)
+      - name: Package artifact (macOS)
         if: runner.os == 'macOS'
         run: |
-          mv dist/NapisyTWON dist/${{ matrix.artifact_name }}
+          cd dist && zip -r ${{ matrix.artifact_name }} NapisyTWON.app
 
       - name: Rename artifact (Linux)
         if: runner.os == 'Linux'
@@ -89,7 +89,7 @@ jobs:
         with:
           files: |
             artifacts/NapisyTWON-Windows.exe/NapisyTWON-Windows.exe
-            artifacts/NapisyTWON-macOS/NapisyTWON-macOS
+            artifacts/NapisyTWON-macOS.zip/NapisyTWON-macOS.zip
             artifacts/NapisyTWON-Linux/NapisyTWON-Linux
           generate_release_notes: true
         env:
