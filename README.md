@@ -1,4 +1,4 @@
-# Napisy-TWON v2
+# NapisyTWON
 
 A modern PDF annotation tool for adding numbered labels to PDF documents.
 
@@ -92,7 +92,7 @@ python main.py document.pdf
 ## Architecture
 
 ```
-Napisy-TWON-v2/
+NapisyTWON/
 ├── main.py              # Application entry point
 ├── requirements.txt     # Python dependencies
 ├── src/

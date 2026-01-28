@@ -16,7 +16,6 @@ from typing import Optional
 import fitz
 
 from .pdf_viewer import PDFViewer, ToolMode
-from .thumbnail_panel import ThumbnailPanel
 from .annotation_list import AnnotationListPanel
 from .models import NumberAnnotation, NumberStyle, AnnotationStore, StylePresets, parse_number
 from .undo_manager import UndoManager, UndoAction
@@ -122,7 +121,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Napisy-TWON v2")
+        self.setWindowTitle("NapisyTWON")
         self.setMinimumSize(1000, 700)
 
         # State
@@ -134,7 +133,7 @@ class MainWindow(QMainWindow):
         self._max_recent = 10
 
         # Settings
-        self._settings = QSettings("NapisyTWON", "NapisyTWON2")
+        self._settings = QSettings("NapisyTWON", "NapisyTWON")
         self._load_settings()
 
         # Create UI
@@ -167,16 +166,6 @@ class MainWindow(QMainWindow):
         self.action_save_as.triggered.connect(self._save_file_as)
         self.action_save_as.setEnabled(False)
 
-        self.action_export_image = QAction("&Export Page as Image...", self)
-        self.action_export_image.setShortcut(QKeySequence("Ctrl+E"))
-        self.action_export_image.triggered.connect(self._export_image)
-        self.action_export_image.setEnabled(False)
-
-        self.action_export_positions = QAction("Export Positions...", self)
-        self.action_export_positions.triggered.connect(self._export_positions)
-
-        self.action_import_positions = QAction("Import Positions...", self)
-        self.action_import_positions.triggered.connect(self._import_positions)
 
         self.action_exit = QAction("E&xit", self)
         self.action_exit.setShortcut(QKeySequence.StandardKey.Quit)
@@ -245,10 +234,6 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.action_save)
         file_menu.addAction(self.action_save_as)
         file_menu.addSeparator()
-        file_menu.addAction(self.action_export_image)
-        file_menu.addAction(self.action_export_positions)
-        file_menu.addAction(self.action_import_positions)
-        file_menu.addSeparator()
         file_menu.addAction(self.action_exit)
 
         # Edit menu
@@ -272,6 +257,9 @@ class MainWindow(QMainWindow):
         # Style menu
         style_menu = menubar.addMenu("&Style")
         style_menu.addAction(self.action_presets)
+        style_menu.addSeparator()
+        reset_style_action = style_menu.addAction("Reset Style to Defaults")
+        reset_style_action.triggered.connect(self._reset_style_to_defaults)
 
     def _create_toolbar(self):
         """Create main toolbar."""
@@ -360,11 +348,36 @@ class MainWindow(QMainWindow):
 
         self._border_width_spin = QSpinBox()
         self._border_width_spin.setRange(1, 20)
-        self._border_width_spin.setValue(2)
+        self._border_width_spin.setValue(1)
         self._border_width_spin.setFixedWidth(50)
         self._border_width_spin.setToolTip("Border width")
         self._border_width_spin.valueChanged.connect(self._on_style_changed)
         toolbar.addWidget(self._border_width_spin)
+
+        toolbar.addSeparator()
+
+        # Tail settings (vertical line going down from center bottom)
+        self._tail_check = QCheckBox("Tail")
+        self._tail_check.stateChanged.connect(self._on_style_changed)
+        toolbar.addWidget(self._tail_check)
+
+        toolbar.addWidget(QLabel(" L:"))
+        self._tail_length_spin = QSpinBox()
+        self._tail_length_spin.setRange(5, 200)
+        self._tail_length_spin.setValue(20)
+        self._tail_length_spin.setFixedWidth(50)
+        self._tail_length_spin.setToolTip("Tail length")
+        self._tail_length_spin.valueChanged.connect(self._on_style_changed)
+        toolbar.addWidget(self._tail_length_spin)
+
+        toolbar.addWidget(QLabel(" W:"))
+        self._tail_width_spin = QSpinBox()
+        self._tail_width_spin.setRange(1, 20)
+        self._tail_width_spin.setValue(1)
+        self._tail_width_spin.setFixedWidth(50)
+        self._tail_width_spin.setToolTip("Tail width")
+        self._tail_width_spin.valueChanged.connect(self._on_style_changed)
+        toolbar.addWidget(self._tail_width_spin)
 
         toolbar.addSeparator()
 
@@ -403,10 +416,6 @@ class MainWindow(QMainWindow):
         """Create the central widget with splitter."""
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Thumbnail panel
-        self._thumbnail_panel = ThumbnailPanel()
-        splitter.addWidget(self._thumbnail_panel)
-
         # PDF viewer
         self._viewer = PDFViewer()
         splitter.addWidget(self._viewer)
@@ -416,7 +425,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self._annotation_panel)
 
         # Set sizes
-        splitter.setSizes([150, 700, 200])
+        splitter.setSizes([700, 200])
 
         self.setCentralWidget(splitter)
 
@@ -437,9 +446,6 @@ class MainWindow(QMainWindow):
         self._viewer.annotation_deleted.connect(self._on_annotation_deleted)
         self._viewer.duplicate_number_requested.connect(self._on_duplicate_number_requested)
         self._viewer.edit_annotation_requested.connect(self._change_annotation_number)
-
-        # Thumbnail panel signals
-        self._thumbnail_panel.page_selected.connect(self._viewer.go_to_page)
 
         # Annotation list panel signals
         self._annotation_panel.jump_to_annotation.connect(self._jump_to_annotation)
@@ -486,6 +492,45 @@ class MainWindow(QMainWindow):
         self._settings.setValue("style_presets", self._presets.to_json())
         self._settings.setValue("current_style", json.dumps(self._style.to_dict()))
 
+    def _reset_style_to_defaults(self):
+        """Reset style to factory defaults."""
+        self._style = NumberStyle()
+
+        # Block signals to prevent partial updates
+        self._font_combo.blockSignals(True)
+        self._size_spin.blockSignals(True)
+        self._opacity_spin.blockSignals(True)
+        self._border_check.blockSignals(True)
+        self._border_width_spin.blockSignals(True)
+        self._tail_check.blockSignals(True)
+        self._tail_length_spin.blockSignals(True)
+        self._tail_width_spin.blockSignals(True)
+
+        # Apply all settings
+        self._font_combo.setCurrentText(self._style.font_family)
+        self._size_spin.setValue(self._style.font_size)
+        self._text_color_btn.setStyleSheet(f"background-color: {self._style.text_color};")
+        self._bg_color_btn.setStyleSheet(f"background-color: {self._style.bg_color};")
+        self._opacity_spin.setValue(self._style.bg_opacity)
+        self._border_check.setChecked(self._style.border_enabled)
+        self._border_width_spin.setValue(self._style.border_width)
+        self._tail_check.setChecked(self._style.tail_enabled)
+        self._tail_length_spin.setValue(self._style.tail_length)
+        self._tail_width_spin.setValue(self._style.tail_width)
+
+        # Unblock signals
+        self._font_combo.blockSignals(False)
+        self._size_spin.blockSignals(False)
+        self._opacity_spin.blockSignals(False)
+        self._border_check.blockSignals(False)
+        self._border_width_spin.blockSignals(False)
+        self._tail_check.blockSignals(False)
+        self._tail_length_spin.blockSignals(False)
+        self._tail_width_spin.blockSignals(False)
+
+        self._viewer.set_style(self._style)
+        self._statusbar.showMessage("Style reset to defaults")
+
     def _apply_settings(self):
         """Apply loaded settings to UI."""
         self._font_combo.setCurrentText(self._style.font_family)
@@ -495,6 +540,9 @@ class MainWindow(QMainWindow):
         self._opacity_spin.setValue(self._style.bg_opacity)
         self._border_check.setChecked(self._style.border_enabled)
         self._border_width_spin.setValue(self._style.border_width)
+        self._tail_check.setChecked(self._style.tail_enabled)
+        self._tail_length_spin.setValue(self._style.tail_length)
+        self._tail_width_spin.setValue(self._style.tail_width)
 
     def _update_recent_menu(self):
         """Update the recent files menu."""
@@ -552,17 +600,11 @@ class MainWindow(QMainWindow):
             self._enable_file_actions(True)
             self._undo_manager.clear()
 
-            # Update thumbnail panel
-            doc = self._viewer.get_document()
-            if doc:
-                self._thumbnail_panel.set_document(doc)
-
             # Update annotation panel
             self._refresh_annotation_panel()
 
             # Update thumbnail indicators (in case annotations were loaded from metadata)
-            self._update_thumbnail_indicators()
-
+            
             # Update page navigation
             self._on_page_changed(0)
 
@@ -623,9 +665,11 @@ class MainWindow(QMainWindow):
             # Just save the document
             doc.save(path, garbage=4, deflate=True)
 
-            # After save with garbage collection, xrefs may have changed
-            # Refresh xrefs to ensure our annotation store matches the PDF
-            self._viewer.refresh_xrefs_after_save()
+            # Reload the document to get fresh xrefs after garbage collection
+            # This ensures annotations can be found and moved properly
+            current_page = self._viewer.current_page()
+            self._viewer.reload_document(path)
+            self._viewer.go_to_page(current_page)
 
             self._current_file = path
             self._viewer.get_annotations().modified = False
@@ -634,72 +678,6 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             QMessageBox.critical(self, "Save Error", str(e))
-
-    def _export_image(self):
-        """Export current page as image."""
-        path, selected_filter = QFileDialog.getSaveFileName(
-            self, "Export Page as Image", "",
-            "PNG Image (*.png);;JPEG Image (*.jpg);;All Files (*.*)"
-        )
-        if not path:
-            return
-
-        # Determine format
-        if path.lower().endswith('.jpg') or path.lower().endswith('.jpeg'):
-            fmt = "JPG"
-        else:
-            fmt = "PNG"
-            if not path.lower().endswith('.png'):
-                path += '.png'
-
-        # Get image
-        page = self._viewer.current_page()
-        img = self._viewer.get_page_image(page, scale=2.0)
-        if img:
-            img.save(path, fmt)
-            self._statusbar.showMessage(f"Exported: {os.path.basename(path)}")
-
-    def _export_positions(self):
-        """Export annotation positions to JSON."""
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export Positions", "",
-            "JSON Files (*.json)"
-        )
-        if not path:
-            return
-
-        if not path.lower().endswith('.json'):
-            path += '.json'
-
-        try:
-            with open(path, 'w') as f:
-                f.write(self._viewer.get_annotations().to_json())
-            self._statusbar.showMessage(f"Exported positions: {os.path.basename(path)}")
-        except Exception as e:
-            QMessageBox.critical(self, "Export Error", str(e))
-
-    def _import_positions(self):
-        """Import annotation positions from JSON."""
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Import Positions", "",
-            "JSON Files (*.json)"
-        )
-        if not path:
-            return
-
-        try:
-            with open(path, 'r') as f:
-                json_str = f.read()
-
-            annotations = self._viewer.get_annotations()
-            annotations.from_json(json_str)
-            self._viewer.set_annotations(annotations)
-            self._refresh_annotation_panel()
-            self._update_title()
-            self._update_thumbnail_indicators()
-            self._statusbar.showMessage(f"Imported positions: {os.path.basename(path)}")
-        except Exception as e:
-            QMessageBox.critical(self, "Import Error", str(e))
 
     def _enable_file_actions(self, enabled: bool):
         """Enable/disable file-related actions."""
@@ -725,7 +703,6 @@ class MainWindow(QMainWindow):
         self._page_spin.setValue(page + 1)
         self._page_spin.blockSignals(False)
         self._page_total_label.setText(f" / {total} ")
-        self._thumbnail_panel.set_current_page(page)
 
     def _on_page_spin_changed(self, value: int):
         """Handle page spinbox value change."""
@@ -754,6 +731,9 @@ class MainWindow(QMainWindow):
         self._opacity_spin.blockSignals(True)
         self._border_check.blockSignals(True)
         self._border_width_spin.blockSignals(True)
+        self._tail_check.blockSignals(True)
+        self._tail_length_spin.blockSignals(True)
+        self._tail_width_spin.blockSignals(True)
 
         self._font_combo.setCurrentText(style.font_family)
         self._size_spin.setValue(style.font_size)
@@ -762,6 +742,9 @@ class MainWindow(QMainWindow):
         self._opacity_spin.setValue(style.bg_opacity)
         self._border_check.setChecked(style.border_enabled)
         self._border_width_spin.setValue(style.border_width)
+        self._tail_check.setChecked(style.tail_enabled)
+        self._tail_length_spin.setValue(style.tail_length)
+        self._tail_width_spin.setValue(style.tail_width)
 
         # Update internal style
         self._style = NumberStyle(
@@ -773,7 +756,10 @@ class MainWindow(QMainWindow):
             bg_opacity=style.bg_opacity,
             padding=style.padding,
             border_enabled=style.border_enabled,
-            border_width=style.border_width
+            border_width=style.border_width,
+            tail_enabled=style.tail_enabled,
+            tail_length=style.tail_length,
+            tail_width=style.tail_width
         )
 
         self._font_combo.blockSignals(False)
@@ -781,6 +767,9 @@ class MainWindow(QMainWindow):
         self._opacity_spin.blockSignals(False)
         self._border_check.blockSignals(False)
         self._border_width_spin.blockSignals(False)
+        self._tail_check.blockSignals(False)
+        self._tail_length_spin.blockSignals(False)
+        self._tail_width_spin.blockSignals(False)
 
     def _on_annotation_added(self, annotation: NumberAnnotation):
         """Handle new annotation added."""
@@ -792,8 +781,7 @@ class MainWindow(QMainWindow):
             self._number_edit.setText(f"{main}.{sub + 1}")
 
         self._update_title()
-        self._update_thumbnail_indicators()
-        self._refresh_annotation_panel()
+                self._refresh_annotation_panel()
 
         # Add undo action
         action = UndoAction(
@@ -844,8 +832,7 @@ class MainWindow(QMainWindow):
     def _on_annotation_deleted(self, annotation: NumberAnnotation):
         """Handle annotation deleted."""
         self._update_title()
-        self._update_thumbnail_indicators()
-        self._refresh_annotation_panel()
+                self._refresh_annotation_panel()
 
         action = UndoAction(
             description=f"Delete #{annotation.number}",
@@ -867,14 +854,6 @@ class MainWindow(QMainWindow):
         """Redo deleting an annotation."""
         self._viewer.delete_annotation(annotation)
         self._refresh_annotation_panel()
-
-    def _update_thumbnail_indicators(self):
-        """Update annotation indicators on thumbnails."""
-        annotations = self._viewer.get_annotations()
-        by_page = {}
-        for a in annotations.all():
-            by_page[a.page] = by_page.get(a.page, 0) + 1
-        self._thumbnail_panel.update_annotation_indicators(by_page)
 
     def _on_number_edited(self):
         """Handle next number changed."""
@@ -902,6 +881,9 @@ class MainWindow(QMainWindow):
         self._style.bg_opacity = self._opacity_spin.value()
         self._style.border_enabled = self._border_check.isChecked()
         self._style.border_width = self._border_width_spin.value()
+        self._style.tail_enabled = self._tail_check.isChecked()
+        self._style.tail_length = self._tail_length_spin.value()
+        self._style.tail_width = self._tail_width_spin.value()
         self._viewer.set_style(self._style)
 
     def _choose_text_color(self):
@@ -935,6 +917,9 @@ class MainWindow(QMainWindow):
         annotation.style.bg_opacity = self._style.bg_opacity
         annotation.style.border_enabled = self._style.border_enabled
         annotation.style.border_width = self._style.border_width
+        annotation.style.tail_enabled = self._style.tail_enabled
+        annotation.style.tail_length = self._style.tail_length
+        annotation.style.tail_width = self._style.tail_width
 
         # Update PDF annotation (delete old, create new with new style)
         self._viewer._delete_pdf_annotation(annotation)
@@ -1004,8 +989,7 @@ class MainWindow(QMainWindow):
             self._undo_manager.clear()
             self._refresh_annotation_panel()
             self._update_title()
-            self._update_thumbnail_indicators()
-            self._statusbar.showMessage("Cleared all annotations")
+                        self._statusbar.showMessage("Cleared all annotations")
 
     def _refresh_annotation_panel(self):
         """Refresh the annotation list panel."""
@@ -1204,8 +1188,7 @@ class MainWindow(QMainWindow):
                 self._viewer.refresh_page()
                 self._refresh_annotation_panel()
                 self._update_title()
-                self._update_thumbnail_indicators()
-                self._statusbar.showMessage(f"Deleted #{annotation.number}, decreased {len(changes)} others")
+                                self._statusbar.showMessage(f"Deleted #{annotation.number}, decreased {len(changes)} others")
                 return
 
             # Fall through to regular delete

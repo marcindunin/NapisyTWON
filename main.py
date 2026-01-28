@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Napisy-TWON v2 - PDF Number Annotation Tool
+"""NapisyTWON - PDF Number Annotation Tool
 
 A modern PDF annotation tool for adding numbered labels to PDF documents.
 """
@@ -30,7 +30,7 @@ def main():
     )
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Napisy-TWON")
+    app.setApplicationName("NapisyTWON")
     app.setApplicationVersion("2.0.0")
     app.setOrganizationName("NapisyTWON")
 
