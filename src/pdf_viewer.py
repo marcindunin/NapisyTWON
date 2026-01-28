@@ -130,18 +130,27 @@ class PDFPreviewItem(QGraphicsPixmapItem):
             doc.xref_set_key(annot_xref, "BS", f"<</W {style.border_width}/S/S>>")
             annot.update()
 
-        # Add small 'p' subscript if needed
+        # Add small 'p' subscript annotation if needed
         if has_p_suffix:
             # Position 'p' at bottom-right of the number, as subscript
             p_x = rect.x0 + padding + base_width
-            p_y = rect.y1 - padding - p_fontsize * 0.3  # subscript position
-            page.insert_text(
-                fitz.Point(p_x, p_y),
+            p_y = rect.y0 + padding + text_height * 0.5  # subscript position (lower half)
+            p_rect = fitz.Rect(p_x, p_y, p_x + p_width + 2, p_y + p_fontsize + 2)
+
+            p_annot = page.add_freetext_annot(
+                p_rect,
                 'p',
                 fontsize=p_fontsize,
                 fontname="helv",
-                color=fg_rgb
+                text_color=fg_rgb,
+                fill_color=None,  # transparent background
+                align=fitz.TEXT_ALIGN_LEFT,
             )
+            p_annot.set_opacity(1.0)
+            p_annot.update()
+            # Remove border from 'p' annotation
+            doc.xref_set_key(p_annot.xref, "Border", "[0 0 0]")
+            p_annot.update()
 
         # Add tail line if enabled
         if style.tail_enabled:
@@ -1168,8 +1177,15 @@ class PDFViewer(QGraphicsView):
             # Calculate expected rect
             style = annotation.style
             text = str(annotation.number)
+            # Handle 'p' suffix
+            has_p_suffix = text.endswith('p')
+            base_text = text[:-1] if has_p_suffix else text
+            p_fontsize = int(style.font_size * 0.5)
+
             font = fitz.Font("helv")
-            text_width = font.text_length(text, fontsize=style.font_size)
+            base_width = font.text_length(base_text, fontsize=style.font_size)
+            p_width = font.text_length('p', fontsize=p_fontsize) if has_p_suffix else 0
+            text_width = base_width + p_width
             text_height = style.font_size
             padding = style.padding
 
@@ -1179,6 +1195,10 @@ class PDFViewer(QGraphicsView):
                 annotation.x + text_width + padding * 2,
                 annotation.y + text_height + padding * 2
             )
+
+            # Calculate expected 'p' position
+            p_x = expected_rect.x0 + padding + base_width
+            p_y = expected_rect.y0 + padding + text_height * 0.5
 
             # Calculate expected tail position
             center_x = expected_rect.x0 + (expected_rect.width / 2)
@@ -1197,6 +1217,18 @@ class PDFViewer(QGraphicsView):
                         abs(annot_rect.y1 - expected_rect.y1) < 2):
                         annotation.pdf_annot_xref = annot.xref
                         break
+
+            # Find matching 'p' annotation if has suffix
+            if has_p_suffix:
+                for annot in page.annots():
+                    if annot.type[0] == fitz.PDF_ANNOT_FREE_TEXT:
+                        annot_rect = annot.rect
+                        # Check if this is the small 'p' annotation (near expected position)
+                        if (abs(annot_rect.x0 - p_x) < 5 and
+                            abs(annot_rect.y0 - p_y) < 5 and
+                            annot_rect.width < text_height):  # 'p' rect is smaller
+                            annotation.pdf_p_xref = annot.xref
+                            break
 
             # Find matching tail annotation (Line type)
             if style.tail_enabled:
@@ -1255,6 +1287,9 @@ class PDFViewer(QGraphicsView):
 
             # Match annotations to PDF annotation xrefs by name (/NM)
             self._sync_xrefs_by_name()
+
+            # Also sync 'p' and tail annotation xrefs by position
+            self.refresh_xrefs_after_save()
 
             return True
 

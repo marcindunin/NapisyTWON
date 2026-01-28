@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QListWidget, QListWidgetItem, QApplication
 )
 from PySide6.QtCore import Qt, QSettings, QTimer, Signal
-from PySide6.QtGui import QAction, QIcon, QColor, QKeySequence, QFont, QFontDatabase
+from PySide6.QtGui import QAction, QIcon, QColor, QKeySequence, QFont, QFontDatabase, QShortcut
 from typing import Optional
 import fitz
 
@@ -147,6 +147,9 @@ class MainWindow(QMainWindow):
 
         # Connect signals
         self._connect_signals()
+
+        # Setup keyboard shortcuts
+        self._setup_shortcuts()
 
         # Apply loaded settings
         self._apply_settings()
@@ -476,6 +479,23 @@ class MainWindow(QMainWindow):
 
         # Undo manager signals
         self._undo_manager.state_changed.connect(self._update_undo_actions)
+
+    def _setup_shortcuts(self):
+        """Setup keyboard shortcuts that work regardless of focus."""
+        # 'P' key for toggling empty mode
+        self._shortcut_p = QShortcut(QKeySequence("P"), self)
+        self._shortcut_p.activated.connect(self._on_p_key_pressed)
+
+    def _on_p_key_pressed(self):
+        """Handle 'P' key press for empty mode toggle."""
+        # Check if an annotation is selected
+        selected = self._viewer._selected_annotation
+        if selected:
+            # Toggle 'p' suffix on selected annotation
+            self._toggle_annotation_empty(selected)
+        else:
+            # Toggle empty mode for next insertion
+            self._toggle_empty_mode()
 
     def _load_settings(self):
         """Load application settings."""
@@ -990,20 +1010,6 @@ class MainWindow(QMainWindow):
 
         self._statusbar.showMessage(status)
 
-    def keyPressEvent(self, event):
-        """Handle key press events."""
-        if event.key() == Qt.Key.Key_P and not event.modifiers():
-            # Check if an annotation is selected
-            selected = self._viewer._selected_annotation
-            if selected:
-                # Toggle 'p' suffix on selected annotation
-                self._toggle_annotation_empty(selected)
-            else:
-                # Toggle empty mode for next insertion
-                self._toggle_empty_mode()
-            event.accept()
-            return
-        super().keyPressEvent(event)
 
     def _set_tool_mode(self, mode: ToolMode):
         """Set the current tool mode."""
