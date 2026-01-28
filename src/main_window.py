@@ -781,7 +781,7 @@ class MainWindow(QMainWindow):
             self._number_edit.setText(f"{main}.{sub + 1}")
 
         self._update_title()
-                self._refresh_annotation_panel()
+        self._refresh_annotation_panel()
 
         # Add undo action
         action = UndoAction(
@@ -832,7 +832,7 @@ class MainWindow(QMainWindow):
     def _on_annotation_deleted(self, annotation: NumberAnnotation):
         """Handle annotation deleted."""
         self._update_title()
-                self._refresh_annotation_panel()
+        self._refresh_annotation_panel()
 
         action = UndoAction(
             description=f"Delete #{annotation.number}",
@@ -989,7 +989,7 @@ class MainWindow(QMainWindow):
             self._undo_manager.clear()
             self._refresh_annotation_panel()
             self._update_title()
-                        self._statusbar.showMessage("Cleared all annotations")
+            self._statusbar.showMessage("Cleared all annotations")
 
     def _refresh_annotation_panel(self):
         """Refresh the annotation list panel."""
@@ -1188,7 +1188,7 @@ class MainWindow(QMainWindow):
                 self._viewer.refresh_page()
                 self._refresh_annotation_panel()
                 self._update_title()
-                                self._statusbar.showMessage(f"Deleted #{annotation.number}, decreased {len(changes)} others")
+                self._statusbar.showMessage(f"Deleted #{annotation.number}, decreased {len(changes)} others")
                 return
 
             # Fall through to regular delete
