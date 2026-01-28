@@ -19,6 +19,7 @@ from .pdf_viewer import PDFViewer, ToolMode
 from .annotation_list import AnnotationListPanel
 from .models import NumberAnnotation, NumberStyle, AnnotationStore, StylePresets, parse_number
 from .undo_manager import UndoManager, UndoAction
+from .translations import tr, Translator
 
 
 class StylePresetDialog(QDialog):
@@ -30,7 +31,7 @@ class StylePresetDialog(QDialog):
         self.current_style = current_style
         self.selected_preset: Optional[str] = None
 
-        self.setWindowTitle("Style Presets")
+        self.setWindowTitle(tr("Style Presets"))
         self.setMinimumSize(300, 400)
 
         layout = QVBoxLayout(self)
@@ -44,10 +45,10 @@ class StylePresetDialog(QDialog):
         # Save current as preset
         save_layout = QHBoxLayout()
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("New preset name...")
+        self.name_edit.setPlaceholderText(tr("New preset name..."))
         save_layout.addWidget(self.name_edit)
 
-        save_btn = QPushButton("Save Current")
+        save_btn = QPushButton(tr("Save Current"))
         save_btn.clicked.connect(self._save_current)
         save_layout.addWidget(save_btn)
         layout.addLayout(save_layout)
@@ -55,17 +56,17 @@ class StylePresetDialog(QDialog):
         # Buttons
         btn_layout = QHBoxLayout()
 
-        delete_btn = QPushButton("Delete")
+        delete_btn = QPushButton(tr("Delete"))
         delete_btn.clicked.connect(self._delete_selected)
         btn_layout.addWidget(delete_btn)
 
         btn_layout.addStretch()
 
-        load_btn = QPushButton("Load")
+        load_btn = QPushButton(tr("Load"))
         load_btn.clicked.connect(self._load_selected)
         btn_layout.addWidget(load_btn)
 
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton(tr("Close"))
         close_btn.clicked.connect(self.reject)
         btn_layout.addWidget(close_btn)
 
@@ -79,7 +80,7 @@ class StylePresetDialog(QDialog):
     def _save_current(self):
         name = self.name_edit.text().strip()
         if not name:
-            QMessageBox.warning(self, "Error", "Please enter a name for the preset.")
+            QMessageBox.warning(self, tr("Error"), tr("Please enter a name for the preset."))
             return
 
         style = NumberStyle(**{
@@ -99,8 +100,8 @@ class StylePresetDialog(QDialog):
         item = self.list_widget.currentItem()
         if item:
             name = item.text()
-            if name == "Default":
-                QMessageBox.warning(self, "Error", "Cannot delete the default preset.")
+            if name == tr("Default"):
+                QMessageBox.warning(self, tr("Error"), tr("Cannot delete the default preset."))
                 return
             self.presets.delete(name)
             self._populate_list()
@@ -152,71 +153,71 @@ class MainWindow(QMainWindow):
     def _create_actions(self):
         """Create all actions."""
         # File actions
-        self.action_open = QAction("&Open PDF...", self)
+        self.action_open = QAction(tr("&Open PDF..."), self)
         self.action_open.setShortcut(QKeySequence.StandardKey.Open)
         self.action_open.triggered.connect(self._open_file)
 
-        self.action_save = QAction("&Save", self)
+        self.action_save = QAction(tr("&Save"), self)
         self.action_save.setShortcut(QKeySequence.StandardKey.Save)
         self.action_save.triggered.connect(self._save_file)
         self.action_save.setEnabled(False)
 
-        self.action_save_as = QAction("Save &As...", self)
+        self.action_save_as = QAction(tr("Save &As..."), self)
         self.action_save_as.setShortcut(QKeySequence("Ctrl+Shift+S"))
         self.action_save_as.triggered.connect(self._save_file_as)
         self.action_save_as.setEnabled(False)
 
 
-        self.action_exit = QAction("E&xit", self)
+        self.action_exit = QAction(tr("E&xit"), self)
         self.action_exit.setShortcut(QKeySequence.StandardKey.Quit)
         self.action_exit.triggered.connect(self.close)
 
         # Edit actions
-        self.action_undo = QAction("&Undo", self)
+        self.action_undo = QAction(tr("&Undo"), self)
         self.action_undo.setShortcut(QKeySequence.StandardKey.Undo)
         self.action_undo.triggered.connect(self._undo)
         self.action_undo.setEnabled(False)
 
-        self.action_redo = QAction("&Redo", self)
+        self.action_redo = QAction(tr("&Redo"), self)
         self.action_redo.setShortcut(QKeySequence.StandardKey.Redo)
         self.action_redo.triggered.connect(self._redo)
         self.action_redo.setEnabled(False)
 
-        self.action_delete = QAction("&Delete Selected", self)
+        self.action_delete = QAction(tr("&Delete Selected"), self)
         self.action_delete.setShortcut(QKeySequence.StandardKey.Delete)
         self.action_delete.triggered.connect(self._delete_selected)
         self.action_delete.setEnabled(False)
 
-        self.action_clear_all = QAction("Clear &All Numbers", self)
+        self.action_clear_all = QAction(tr("Clear &All Numbers"), self)
         self.action_clear_all.triggered.connect(self._clear_all)
 
         # View actions
-        self.action_zoom_in = QAction("Zoom &In", self)
+        self.action_zoom_in = QAction(tr("Zoom &In"), self)
         self.action_zoom_in.setShortcut(QKeySequence.StandardKey.ZoomIn)
         self.action_zoom_in.triggered.connect(lambda: self._viewer.zoom_in())
 
-        self.action_zoom_out = QAction("Zoom &Out", self)
+        self.action_zoom_out = QAction(tr("Zoom &Out"), self)
         self.action_zoom_out.setShortcut(QKeySequence.StandardKey.ZoomOut)
         self.action_zoom_out.triggered.connect(lambda: self._viewer.zoom_out())
 
-        self.action_zoom_fit = QAction("&Fit to Window", self)
+        self.action_zoom_fit = QAction(tr("&Fit to Window"), self)
         self.action_zoom_fit.setShortcut(QKeySequence("Ctrl+0"))
         self.action_zoom_fit.triggered.connect(lambda: self._viewer.zoom_fit())
 
-        self.action_zoom_100 = QAction("&Actual Size", self)
+        self.action_zoom_100 = QAction(tr("&Actual Size"), self)
         self.action_zoom_100.setShortcut(QKeySequence("Ctrl+1"))
         self.action_zoom_100.triggered.connect(lambda: self._viewer.zoom_100())
 
-        self.action_next_page = QAction("&Next Page", self)
+        self.action_next_page = QAction(tr("&Next Page"), self)
         self.action_next_page.setShortcut(QKeySequence("Right"))
         self.action_next_page.triggered.connect(lambda: self._viewer.next_page())
 
-        self.action_prev_page = QAction("&Previous Page", self)
+        self.action_prev_page = QAction(tr("&Previous Page"), self)
         self.action_prev_page.setShortcut(QKeySequence("Left"))
         self.action_prev_page.triggered.connect(lambda: self._viewer.prev_page())
 
         # Style actions
-        self.action_presets = QAction("Style &Presets...", self)
+        self.action_presets = QAction(tr("Style &Presets..."), self)
         self.action_presets.triggered.connect(self._show_presets)
 
     def _create_menus(self):
@@ -224,10 +225,10 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
 
         # File menu
-        file_menu = menubar.addMenu("&File")
+        file_menu = menubar.addMenu(tr("&File"))
         file_menu.addAction(self.action_open)
 
-        self.recent_menu = file_menu.addMenu("Recent Files")
+        self.recent_menu = file_menu.addMenu(tr("Recent Files"))
         self._update_recent_menu()
 
         file_menu.addSeparator()
@@ -237,7 +238,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.action_exit)
 
         # Edit menu
-        edit_menu = menubar.addMenu("&Edit")
+        edit_menu = menubar.addMenu(tr("&Edit"))
         edit_menu.addAction(self.action_undo)
         edit_menu.addAction(self.action_redo)
         edit_menu.addSeparator()
@@ -245,7 +246,7 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.action_clear_all)
 
         # View menu
-        view_menu = menubar.addMenu("&View")
+        view_menu = menubar.addMenu(tr("&View"))
         view_menu.addAction(self.action_zoom_in)
         view_menu.addAction(self.action_zoom_out)
         view_menu.addAction(self.action_zoom_fit)
@@ -255,27 +256,36 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.action_next_page)
 
         # Style menu
-        style_menu = menubar.addMenu("&Style")
+        style_menu = menubar.addMenu(tr("&Style"))
         style_menu.addAction(self.action_presets)
         style_menu.addSeparator()
-        reset_style_action = style_menu.addAction("Reset Style to Defaults")
+        save_as_default_action = style_menu.addAction(tr("Save Current as Default"))
+        save_as_default_action.triggered.connect(self._save_style_as_default)
+        reset_style_action = style_menu.addAction(tr("Reset Style to Defaults"))
         reset_style_action.triggered.connect(self._reset_style_to_defaults)
+
+        # Language menu
+        lang_menu = menubar.addMenu(tr("&Language"))
+        action_english = lang_menu.addAction("English")
+        action_english.triggered.connect(lambda: self._set_language("en"))
+        action_polish = lang_menu.addAction("Polski")
+        action_polish.triggered.connect(lambda: self._set_language("pl"))
 
     def _create_toolbar(self):
         """Create main toolbar."""
-        toolbar = QToolBar("Main Toolbar")
+        toolbar = QToolBar(tr("Main Toolbar"))
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
         # Tool mode buttons
-        toolbar.addWidget(QLabel(" Tool: "))
-        self._insert_tool_btn = QPushButton("Insert")
+        toolbar.addWidget(QLabel(tr(" Tool: ")))
+        self._insert_tool_btn = QPushButton(tr("Insert"))
         self._insert_tool_btn.setCheckable(True)
         self._insert_tool_btn.setChecked(True)
         self._insert_tool_btn.clicked.connect(lambda: self._set_tool_mode(ToolMode.INSERT))
         toolbar.addWidget(self._insert_tool_btn)
 
-        self._select_tool_btn = QPushButton("Select")
+        self._select_tool_btn = QPushButton(tr("Select"))
         self._select_tool_btn.setCheckable(True)
         self._select_tool_btn.clicked.connect(lambda: self._set_tool_mode(ToolMode.SELECT))
         toolbar.addWidget(self._select_tool_btn)
@@ -283,7 +293,7 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         # Number settings
-        toolbar.addWidget(QLabel(" Next #: "))
+        toolbar.addWidget(QLabel(tr(" Next #: ")))
         self._number_edit = QLineEdit()
         self._number_edit.setText("1")
         self._number_edit.setFixedWidth(70)
@@ -293,7 +303,7 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         # Font
-        toolbar.addWidget(QLabel(" Font: "))
+        toolbar.addWidget(QLabel(tr(" Font: ")))
         self._font_combo = QComboBox()
         self._font_combo.setFixedWidth(150)
         families = QFontDatabase.families()
@@ -303,7 +313,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._font_combo)
 
         # Size
-        toolbar.addWidget(QLabel(" Size: "))
+        toolbar.addWidget(QLabel(tr(" Size: ")))
         self._size_spin = QSpinBox()
         self._size_spin.setRange(8, 200)
         self._size_spin.setValue(48)
@@ -314,14 +324,14 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         # Colors
-        toolbar.addWidget(QLabel(" Text: "))
+        toolbar.addWidget(QLabel(tr(" Text: ")))
         self._text_color_btn = QPushButton()
         self._text_color_btn.setFixedSize(30, 25)
         self._text_color_btn.setStyleSheet(f"background-color: {self._style.text_color};")
         self._text_color_btn.clicked.connect(self._choose_text_color)
         toolbar.addWidget(self._text_color_btn)
 
-        toolbar.addWidget(QLabel(" BG: "))
+        toolbar.addWidget(QLabel(tr(" BG: ")))
         self._bg_color_btn = QPushButton()
         self._bg_color_btn.setFixedSize(30, 25)
         self._bg_color_btn.setStyleSheet(f"background-color: {self._style.bg_color};")
@@ -329,7 +339,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._bg_color_btn)
 
         # Opacity
-        toolbar.addWidget(QLabel(" Opacity: "))
+        toolbar.addWidget(QLabel(tr(" Opacity: ")))
         self._opacity_spin = QDoubleSpinBox()
         self._opacity_spin.setRange(0.0, 1.0)
         self._opacity_spin.setSingleStep(0.1)
@@ -342,47 +352,49 @@ class MainWindow(QMainWindow):
 
         # Border settings
         from PySide6.QtWidgets import QCheckBox
-        self._border_check = QCheckBox("Border")
+        self._border_check = QCheckBox(tr("Border"))
+        self._border_check.setChecked(True)  # Match NumberStyle default
         self._border_check.stateChanged.connect(self._on_style_changed)
         toolbar.addWidget(self._border_check)
 
         self._border_width_spin = QSpinBox()
         self._border_width_spin.setRange(1, 20)
-        self._border_width_spin.setValue(1)
+        self._border_width_spin.setValue(1)  # Match NumberStyle default
         self._border_width_spin.setFixedWidth(50)
-        self._border_width_spin.setToolTip("Border width")
+        self._border_width_spin.setToolTip(tr("Border width"))
         self._border_width_spin.valueChanged.connect(self._on_style_changed)
         toolbar.addWidget(self._border_width_spin)
 
         toolbar.addSeparator()
 
         # Tail settings (vertical line going down from center bottom)
-        self._tail_check = QCheckBox("Tail")
+        self._tail_check = QCheckBox(tr("Tail"))
+        self._tail_check.setChecked(True)  # Match NumberStyle default
         self._tail_check.stateChanged.connect(self._on_style_changed)
         toolbar.addWidget(self._tail_check)
 
-        toolbar.addWidget(QLabel(" L:"))
+        toolbar.addWidget(QLabel(tr(" L:")))
         self._tail_length_spin = QSpinBox()
         self._tail_length_spin.setRange(5, 200)
-        self._tail_length_spin.setValue(20)
+        self._tail_length_spin.setValue(100)  # Match NumberStyle default
         self._tail_length_spin.setFixedWidth(50)
-        self._tail_length_spin.setToolTip("Tail length")
+        self._tail_length_spin.setToolTip(tr("Tail length"))
         self._tail_length_spin.valueChanged.connect(self._on_style_changed)
         toolbar.addWidget(self._tail_length_spin)
 
-        toolbar.addWidget(QLabel(" W:"))
+        toolbar.addWidget(QLabel(tr(" W:")))
         self._tail_width_spin = QSpinBox()
         self._tail_width_spin.setRange(1, 20)
-        self._tail_width_spin.setValue(1)
+        self._tail_width_spin.setValue(2)  # Match NumberStyle default
         self._tail_width_spin.setFixedWidth(50)
-        self._tail_width_spin.setToolTip("Tail width")
+        self._tail_width_spin.setToolTip(tr("Tail width"))
         self._tail_width_spin.valueChanged.connect(self._on_style_changed)
         toolbar.addWidget(self._tail_width_spin)
 
         toolbar.addSeparator()
 
         # Apply to selected button
-        self._apply_style_btn = QPushButton("Apply to Selected")
+        self._apply_style_btn = QPushButton(tr("Apply to Selected"))
         self._apply_style_btn.setEnabled(False)
         self._apply_style_btn.clicked.connect(self._apply_style_to_selected)
         toolbar.addWidget(self._apply_style_btn)
@@ -390,14 +402,14 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         # Presets button
-        presets_btn = QPushButton("Presets")
+        presets_btn = QPushButton(tr("Presets"))
         presets_btn.clicked.connect(self._show_presets)
         toolbar.addWidget(presets_btn)
 
         toolbar.addSeparator()
 
         # Page navigation
-        toolbar.addWidget(QLabel(" Page: "))
+        toolbar.addWidget(QLabel(tr(" Page: ")))
         self._page_spin = QSpinBox()
         self._page_spin.setRange(1, 1)
         self._page_spin.setValue(1)
@@ -409,7 +421,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._page_total_label)
 
         # Zoom indicator
-        self._zoom_label = QLabel(" Zoom: 100% ")
+        self._zoom_label = QLabel(f" {tr('Zoom:')} 100% ")
         toolbar.addWidget(self._zoom_label)
 
     def _create_central_widget(self):
@@ -433,7 +445,7 @@ class MainWindow(QMainWindow):
         """Create status bar."""
         self._statusbar = QStatusBar()
         self.setStatusBar(self._statusbar)
-        self._statusbar.showMessage("Ready")
+        self._statusbar.showMessage(tr("Ready"))
 
     def _connect_signals(self):
         """Connect signals between components."""
@@ -458,6 +470,10 @@ class MainWindow(QMainWindow):
 
     def _load_settings(self):
         """Load application settings."""
+        # Language (load first so UI is in correct language)
+        language = self._settings.value("language", "pl")
+        Translator.set_language(language)
+
         # Window geometry
         geometry = self._settings.value("geometry")
         if geometry:
@@ -491,6 +507,24 @@ class MainWindow(QMainWindow):
         self._settings.setValue("recent_files", self._recent_files)
         self._settings.setValue("style_presets", self._presets.to_json())
         self._settings.setValue("current_style", json.dumps(self._style.to_dict()))
+        self._settings.setValue("language", Translator.get_language())
+
+    def _set_language(self, lang: str):
+        """Set UI language and prompt for restart."""
+        Translator.set_language(lang)
+        self._settings.setValue("language", lang)
+        QMessageBox.information(
+            self,
+            "Language Changed" if lang == "en" else "Zmieniono język",
+            "Please restart the application for the language change to take effect."
+            if lang == "en" else
+            "Uruchom ponownie aplikację, aby zmiana języka została zastosowana."
+        )
+
+    def _save_style_as_default(self):
+        """Save current style settings as default."""
+        self._settings.setValue("current_style", json.dumps(self._style.to_dict()))
+        self._statusbar.showMessage(tr("Current style saved as default"))
 
     def _reset_style_to_defaults(self):
         """Reset style to factory defaults."""
@@ -529,7 +563,7 @@ class MainWindow(QMainWindow):
         self._tail_width_spin.blockSignals(False)
 
         self._viewer.set_style(self._style)
-        self._statusbar.showMessage("Style reset to defaults")
+        self._statusbar.showMessage(tr("Style reset to defaults"))
 
     def _apply_settings(self):
         """Apply loaded settings to UI."""
@@ -554,7 +588,7 @@ class MainWindow(QMainWindow):
 
         if self._recent_files:
             self.recent_menu.addSeparator()
-            clear_action = self.recent_menu.addAction("Clear Recent")
+            clear_action = self.recent_menu.addAction(tr("Clear Recent"))
             clear_action.triggered.connect(self._clear_recent)
 
     def _add_recent_file(self, path: str):
@@ -575,15 +609,15 @@ class MainWindow(QMainWindow):
         if os.path.exists(path):
             self._do_open_file(path)
         else:
-            QMessageBox.warning(self, "File Not Found", f"File not found:\n{path}")
+            QMessageBox.warning(self, tr("File Not Found"), f"{tr('File not found:')}\n{path}")
             self._recent_files.remove(path)
             self._update_recent_menu()
 
     def _open_file(self):
         """Open a PDF file."""
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open PDF", "",
-            "PDF Files (*.pdf);;All Files (*.*)"
+            self, tr("Open PDF"), "",
+            tr("PDF Files (*.pdf);;All Files (*.*)")
         )
         if path:
             self._do_open_file(path)
@@ -611,18 +645,18 @@ class MainWindow(QMainWindow):
             # Show message about loaded annotations
             num_annotations = len(self._viewer.get_annotations().all())
             if num_annotations > 0:
-                self._statusbar.showMessage(f"Opened: {os.path.basename(path)} ({num_annotations} annotations)")
+                self._statusbar.showMessage(f"{tr('Opened:')} {os.path.basename(path)} ({num_annotations} {tr('annotations')})")
             else:
-                self._statusbar.showMessage(f"Opened: {os.path.basename(path)}")
+                self._statusbar.showMessage(f"{tr('Opened:')} {os.path.basename(path)}")
         else:
-            QMessageBox.warning(self, "Error", f"Could not open file:\n{path}")
+            QMessageBox.warning(self, tr("Error"), f"{tr('Could not open file:')}\n{path}")
 
     def _check_unsaved(self) -> bool:
         """Check for unsaved changes. Returns True if should cancel."""
         if self._viewer.get_annotations().modified:
             result = QMessageBox.question(
-                self, "Unsaved Changes",
-                "There are unsaved changes. Do you want to save?",
+                self, tr("Unsaved Changes"),
+                tr("There are unsaved changes. Do you want to save?"),
                 QMessageBox.StandardButton.Save |
                 QMessageBox.StandardButton.Discard |
                 QMessageBox.StandardButton.Cancel
@@ -645,8 +679,8 @@ class MainWindow(QMainWindow):
     def _save_file_as(self):
         """Save as a new file."""
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save PDF As", "",
-            "PDF Files (*.pdf)"
+            self, tr("Save PDF As"), "",
+            tr("PDF Files (*.pdf)")
         )
         if path:
             self._do_save_file(path)
@@ -674,10 +708,10 @@ class MainWindow(QMainWindow):
             self._current_file = path
             self._viewer.get_annotations().modified = False
             self._update_title()
-            self._statusbar.showMessage(f"Saved: {os.path.basename(path)}")
+            self._statusbar.showMessage(f"{tr('Saved:')} {os.path.basename(path)}")
 
         except Exception as e:
-            QMessageBox.critical(self, "Save Error", str(e))
+            QMessageBox.critical(self, tr("Save Error"), str(e))
 
     def _enable_file_actions(self, enabled: bool):
         """Enable/disable file-related actions."""
@@ -687,7 +721,7 @@ class MainWindow(QMainWindow):
 
     def _update_title(self):
         """Update window title."""
-        title = "Napisy-TWON v2"
+        title = "NapisyTWON"
         if self._current_file:
             title += f" - {os.path.basename(self._current_file)}"
         if self._viewer.get_annotations().modified:
@@ -710,18 +744,18 @@ class MainWindow(QMainWindow):
 
     def _on_zoom_changed(self, zoom: float):
         """Handle zoom change."""
-        self._zoom_label.setText(f" Zoom: {int(zoom * 100)}% ")
+        self._zoom_label.setText(f" {tr('Zoom:')} {int(zoom * 100)}% ")
 
     def _on_annotation_selected(self, annotation):
         """Handle annotation selection."""
         self.action_delete.setEnabled(annotation is not None)
         self._apply_style_btn.setEnabled(annotation is not None)
         if annotation:
-            self._statusbar.showMessage(f"Selected: #{annotation.number}")
+            self._statusbar.showMessage(f"{tr('Selected:')} #{annotation.number}")
             # Load annotation's style into the controls
             self._load_style_to_controls(annotation.style)
         else:
-            self._statusbar.showMessage("Ready")
+            self._statusbar.showMessage(tr("Ready"))
 
     def _load_style_to_controls(self, style: NumberStyle):
         """Load a style's settings into the toolbar controls."""
@@ -793,7 +827,7 @@ class MainWindow(QMainWindow):
         )
         self._undo_manager.push(action)
 
-        self._statusbar.showMessage(f"Added: #{annotation.number}")
+        self._statusbar.showMessage(f"{tr('Added:')} #{annotation.number}")
 
     def _undo_add_annotation(self, annotation: NumberAnnotation):
         """Undo adding an annotation."""
@@ -843,7 +877,7 @@ class MainWindow(QMainWindow):
         )
         self._undo_manager.push(action)
 
-        self._statusbar.showMessage(f"Deleted: #{annotation.number}")
+        self._statusbar.showMessage(f"{tr('Deleted:')} #{annotation.number}")
 
     def _undo_delete_annotation(self, annotation: NumberAnnotation):
         """Undo deleting an annotation."""
@@ -872,7 +906,8 @@ class MainWindow(QMainWindow):
         self._viewer.set_tool_mode(mode)
         self._insert_tool_btn.setChecked(mode == ToolMode.INSERT)
         self._select_tool_btn.setChecked(mode == ToolMode.SELECT)
-        self._statusbar.showMessage(f"Tool: {mode.value.capitalize()}")
+        tool_name = tr("Insert") if mode == ToolMode.INSERT else tr("Select")
+        self._statusbar.showMessage(f"{tr('Tool:')} {tool_name}")
 
     def _on_style_changed(self):
         """Handle style settings changed."""
@@ -930,7 +965,7 @@ class MainWindow(QMainWindow):
         self._viewer.refresh_page()
         self._viewer.select_annotation(annotation)  # Re-select after refresh
         self._update_title()
-        self._statusbar.showMessage(f"Applied style to #{annotation.number}")
+        self._statusbar.showMessage(f"{tr('Applied style to')} #{annotation.number}")
 
     def _show_presets(self):
         """Show style presets dialog."""
@@ -946,14 +981,14 @@ class MainWindow(QMainWindow):
         """Undo last action."""
         desc = self._undo_manager.undo()
         if desc:
-            self._statusbar.showMessage(f"Undo: {desc}")
+            self._statusbar.showMessage(f"{tr('Undo:')} {desc}")
             self._update_title()
 
     def _redo(self):
         """Redo last undone action."""
         desc = self._undo_manager.redo()
         if desc:
-            self._statusbar.showMessage(f"Redo: {desc}")
+            self._statusbar.showMessage(f"{tr('Redo:')} {desc}")
             self._update_title()
 
     def _update_undo_actions(self):
@@ -978,8 +1013,8 @@ class MainWindow(QMainWindow):
     def _clear_all(self):
         """Clear all annotations."""
         result = QMessageBox.question(
-            self, "Clear All",
-            "Delete all annotations?",
+            self, tr("Clear All"),
+            tr("Delete all annotations?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if result == QMessageBox.StandardButton.Yes:
@@ -989,7 +1024,7 @@ class MainWindow(QMainWindow):
             self._undo_manager.clear()
             self._refresh_annotation_panel()
             self._update_title()
-            self._statusbar.showMessage("Cleared all annotations")
+            self._statusbar.showMessage(tr("Cleared all annotations"))
 
     def _refresh_annotation_panel(self):
         """Refresh the annotation list panel."""
@@ -1001,12 +1036,12 @@ class MainWindow(QMainWindow):
 
         # Show dialog with options
         msg = QMessageBox(self)
-        msg.setWindowTitle("Number Already Exists")
-        msg.setText(f"Number {number} already exists.")
-        msg.setInformativeText("What would you like to do?")
+        msg.setWindowTitle(tr("Number Already Exists"))
+        msg.setText(f"{tr('Number')} {number} {tr('already exists.')}")
+        msg.setInformativeText(tr("What would you like to do?"))
 
-        advance_btn = msg.addButton("Auto-advance others", QMessageBox.ButtonRole.ActionRole)
-        sub_btn = msg.addButton("Use sub-number", QMessageBox.ButtonRole.ActionRole)
+        advance_btn = msg.addButton(tr("Auto-advance others"), QMessageBox.ButtonRole.ActionRole)
+        sub_btn = msg.addButton(tr("Use sub-number"), QMessageBox.ButtonRole.ActionRole)
         cancel_btn = msg.addButton(QMessageBox.StandardButton.Cancel)
 
         msg.exec()
@@ -1024,14 +1059,14 @@ class MainWindow(QMainWindow):
             self._viewer.insert_annotation_at(pdf_x, pdf_y, number)
             self._viewer.refresh_page()
             self._refresh_annotation_panel()
-            self._statusbar.showMessage(f"Inserted #{number}, advanced {len(changes)} others")
+            self._statusbar.showMessage(f"{tr('Inserted')} #{number}, {tr('advanced')} {len(changes)} {tr('others')}")
 
         elif msg.clickedButton() == sub_btn:
             # Use next available sub-number
             main, _ = parse_number(number)
             sub_num = annotations.get_next_sub_number(str(main))
             self._viewer.insert_annotation_at(pdf_x, pdf_y, sub_num)
-            self._statusbar.showMessage(f"Inserted #{sub_num}")
+            self._statusbar.showMessage(f"{tr('Inserted')} #{sub_num}")
 
     def _jump_to_annotation(self, annotation: NumberAnnotation):
         """Jump to an annotation's location."""
@@ -1052,8 +1087,8 @@ class MainWindow(QMainWindow):
         current_num = annotation.number
 
         new_num, ok = QInputDialog.getText(
-            self, "Change Number",
-            f"Enter new number for #{current_num}:",
+            self, tr("Change Number"),
+            f"{tr('Enter new number for')} #{current_num}:",
             text=current_num
         )
 
@@ -1066,8 +1101,8 @@ class MainWindow(QMainWindow):
         try:
             parse_number(new_num)
         except (ValueError, IndexError):
-            QMessageBox.warning(self, "Invalid Number",
-                                "Please enter a valid number (e.g., 67 or 67.1)")
+            QMessageBox.warning(self, tr("Invalid Number"),
+                                tr("Please enter a valid number (e.g., 67 or 67.1)"))
             return
 
         # Check for duplicates
@@ -1082,12 +1117,12 @@ class MainWindow(QMainWindow):
 
         # Show dialog with options
         msg = QMessageBox(self)
-        msg.setWindowTitle("Number Already Exists")
-        msg.setText(f"Number {new_num} already exists.")
-        msg.setInformativeText("What would you like to do?")
+        msg.setWindowTitle(tr("Number Already Exists"))
+        msg.setText(f"{tr('Number')} {new_num} {tr('already exists.')}")
+        msg.setInformativeText(tr("What would you like to do?"))
 
-        advance_btn = msg.addButton("Auto-advance others", QMessageBox.ButtonRole.ActionRole)
-        sub_btn = msg.addButton("Use sub-number", QMessageBox.ButtonRole.ActionRole)
+        advance_btn = msg.addButton(tr("Auto-advance others"), QMessageBox.ButtonRole.ActionRole)
+        sub_btn = msg.addButton(tr("Use sub-number"), QMessageBox.ButtonRole.ActionRole)
         cancel_btn = msg.addButton(QMessageBox.StandardButton.Cancel)
 
         msg.exec()
@@ -1109,7 +1144,7 @@ class MainWindow(QMainWindow):
             self._viewer.refresh_page()
             self._refresh_annotation_panel()
             self._update_title()
-            self._statusbar.showMessage(f"Changed #{old_num} to #{new_num}, advanced {len(changes)} others")
+            self._statusbar.showMessage(f"{tr('Changed')} #{old_num} {tr('to')} #{new_num}, {tr('advanced')} {len(changes)} {tr('others')}")
 
         elif msg.clickedButton() == sub_btn:
             # Use next available sub-number
@@ -1141,7 +1176,7 @@ class MainWindow(QMainWindow):
         )
         self._undo_manager.push(action)
 
-        self._statusbar.showMessage(f"Changed: #{old_num} to #{new_num}")
+        self._statusbar.showMessage(f"{tr('Changed:')} #{old_num} {tr('to')} #{new_num}")
 
     def _restore_number(self, annotation: NumberAnnotation, number: str):
         """Restore an annotation's number (for undo/redo)."""
@@ -1162,12 +1197,12 @@ class MainWindow(QMainWindow):
         # Only offer auto-decrease for whole numbers
         if sub == 0:
             msg = QMessageBox(self)
-            msg.setWindowTitle("Delete Annotation")
-            msg.setText(f"Delete annotation #{annotation.number}?")
-            msg.setInformativeText("Do you want to auto-decrease following numbers?")
+            msg.setWindowTitle(tr("Delete Annotation"))
+            msg.setText(f"{tr('Delete annotation')} #{annotation.number}?")
+            msg.setInformativeText(tr("Do you want to auto-decrease following numbers?"))
 
-            decrease_btn = msg.addButton("Delete && decrease others", QMessageBox.ButtonRole.ActionRole)
-            delete_btn = msg.addButton("Delete only", QMessageBox.ButtonRole.ActionRole)
+            decrease_btn = msg.addButton(tr("Delete && decrease others"), QMessageBox.ButtonRole.ActionRole)
+            delete_btn = msg.addButton(tr("Delete only"), QMessageBox.ButtonRole.ActionRole)
             cancel_btn = msg.addButton(QMessageBox.StandardButton.Cancel)
 
             msg.exec()
@@ -1188,7 +1223,7 @@ class MainWindow(QMainWindow):
                 self._viewer.refresh_page()
                 self._refresh_annotation_panel()
                 self._update_title()
-                self._statusbar.showMessage(f"Deleted #{annotation.number}, decreased {len(changes)} others")
+                self._statusbar.showMessage(f"{tr('Deleted')} #{annotation.number}, {tr('decreased')} {len(changes)} {tr('others')}")
                 return
 
             # Fall through to regular delete
@@ -1197,8 +1232,8 @@ class MainWindow(QMainWindow):
         else:
             # Sub-numbers: just confirm deletion
             result = QMessageBox.question(
-                self, "Delete Annotation",
-                f"Delete annotation #{annotation.number}?",
+                self, tr("Delete Annotation"),
+                f"{tr('Delete annotation')} #{annotation.number}?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if result == QMessageBox.StandardButton.Yes:
