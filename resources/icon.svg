@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" fill="#1a1a2e"/>
+
+  <!-- Stage curtains (sides) -->
+  <path d="M0 60 Q30 80 30 512 L0 512 Z" fill="#8b0000"/>
+  <path d="M512 60 Q482 80 482 512 L512 512 Z" fill="#8b0000"/>
+
+  <!-- Curtain drapes at top -->
+  <path d="M0 0 L0 80 Q64 120 128 80 Q192 40 256 80 Q320 120 384 80 Q448 40 512 80 L512 0 Z" fill="#a52a2a"/>
+  <path d="M0 0 L0 60 Q64 100 128 60 Q192 20 256 60 Q320 100 384 60 Q448 20 512 60 L512 0 Z" fill="#8b0000"/>
+
+  <!-- Surtitle screen at top -->
+  <rect x="80" y="100" width="352" height="80" rx="4" fill="#2d2d44" stroke="#4a4a6a" stroke-width="3"/>
+
+  <!-- TWON text on surtitle screen -->
+  <text x="256" y="155" font-family="Arial, sans-serif" font-size="52" font-weight="bold" fill="#f0f0f0" text-anchor="middle">TWON</text>
+
+  <!-- Stage floor -->
+  <rect x="30" y="420" width="452" height="92" fill="#3d2817"/>
+  <rect x="30" y="420" width="452" height="8" fill="#5a3d2b"/>
+
+  <!-- Simplified quadriga silhouette (stylized) -->
+  <g fill="#2a2a3a">
+    <!-- Center figure (Apollo/charioteer) -->
+    <ellipse cx="256" cy="320" rx="20" ry="35"/>
+    <circle cx="256" cy="290" r="15"/>
+    <!-- Arms holding reins -->
+    <path d="M241 300 Q200 310 170 340" stroke="#2a2a3a" stroke-width="4" fill="none"/>
+    <path d="M271 300 Q312 310 342 340" stroke="#2a2a3a" stroke-width="4" fill="none"/>
+
+    <!-- Left horses (simplified) -->
+    <ellipse cx="150" cy="370" rx="35" ry="25"/>
+    <ellipse cx="130" cy="345" rx="12" ry="20" transform="rotate(-20 130 345)"/>
+    <path d="M118 330 Q115 310 120 295" stroke="#2a2a3a" stroke-width="6" fill="none"/>
+
+    <ellipse cx="200" cy="365" rx="30" ry="22"/>
+    <ellipse cx="185" cy="342" rx="10" ry="18" transform="rotate(-15 185 342)"/>
+    <path d="M175 328 Q170 308 178 293" stroke="#2a2a3a" stroke-width="5" fill="none"/>
+
+    <!-- Right horses (simplified) -->
+    <ellipse cx="362" cy="370" rx="35" ry="25"/>
+    <ellipse cx="382" cy="345" rx="12" ry="20" transform="rotate(20 382 345)"/>
+    <path d="M394 330 Q397 310 392 295" stroke="#2a2a3a" stroke-width="6" fill="none"/>
+
+    <ellipse cx="312" cy="365" rx="30" ry="22"/>
+    <ellipse cx="327" cy="342" rx="10" ry="18" transform="rotate(15 327 342)"/>
+    <path d="M337 328 Q342 308 334 293" stroke="#2a2a3a" stroke-width="5" fill="none"/>
+
+    <!-- Base/chariot -->
+    <rect x="220" y="350" width="72" height="30" rx="3" fill="#2a2a3a"/>
+  </g>
+
+  <!-- Spotlight effect on stage -->
+  <ellipse cx="256" cy="400" rx="120" ry="30" fill="url(#spotlight)" opacity="0.3"/>
+
+  <defs>
+    <radialGradient id="spotlight">
+      <stop offset="0%" stop-color="#fffacd"/>
+      <stop offset="100%" stop-color="transparent"/>
+    </radialGradient>
+  </defs>
+</svg>

@@ -14,14 +14,14 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact_name: Napisy-TWON-v2-Windows.exe
-            pyinstaller_args: --onefile --windowed --name "Napisy-TWON-v2"
+            artifact_name: NapisyTWON-Windows.exe
+            pyinstaller_args: --onefile --windowed --name "NapisyTWON" --icon "resources/icon.ico" --add-data "resources;resources"
           - os: macos-latest
-            artifact_name: Napisy-TWON-v2-macOS
-            pyinstaller_args: --onefile --windowed --name "Napisy-TWON-v2"
+            artifact_name: NapisyTWON-macOS
+            pyinstaller_args: --onefile --windowed --name "NapisyTWON" --icon "resources/icon.png" --add-data "resources:resources"
           - os: ubuntu-latest
-            artifact_name: Napisy-TWON-v2-Linux
-            pyinstaller_args: --onefile --name "Napisy-TWON-v2"
+            artifact_name: NapisyTWON-Linux
+            pyinstaller_args: --onefile --name "NapisyTWON" --add-data "resources:resources"
 
     runs-on: ${{ matrix.os }}
 
@@ -53,17 +53,17 @@ jobs:
       - name: Rename artifact (Windows)
         if: runner.os == 'Windows'
         run: |
-          move dist\Napisy-TWON-v2.exe dist\${{ matrix.artifact_name }}
+          move dist\NapisyTWON.exe dist\${{ matrix.artifact_name }}
 
       - name: Rename artifact (macOS)
         if: runner.os == 'macOS'
         run: |
-          mv dist/Napisy-TWON-v2 dist/${{ matrix.artifact_name }}
+          mv dist/NapisyTWON dist/${{ matrix.artifact_name }}
 
       - name: Rename artifact (Linux)
         if: runner.os == 'Linux'
         run: |
-          mv dist/Napisy-TWON-v2 dist/${{ matrix.artifact_name }}
+          mv dist/NapisyTWON dist/${{ matrix.artifact_name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -88,9 +88,9 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            artifacts/Napisy-TWON-v2-Windows.exe/Napisy-TWON-v2-Windows.exe
-            artifacts/Napisy-TWON-v2-macOS/Napisy-TWON-v2-macOS
-            artifacts/Napisy-TWON-v2-Linux/Napisy-TWON-v2-Linux
+            artifacts/NapisyTWON-Windows.exe/NapisyTWON-Windows.exe
+            artifacts/NapisyTWON-macOS/NapisyTWON-macOS
+            artifacts/NapisyTWON-Linux/NapisyTWON-Linux
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -7,8 +7,14 @@ A modern PDF annotation tool for adding numbered labels to PDF documents.
 import sys
 import os
 
+# Handle PyInstaller bundled paths
+if getattr(sys, 'frozen', False):
+    BASE_DIR = sys._MEIPASS
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Add src to path for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, BASE_DIR)
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
@@ -30,6 +36,11 @@ def main():
 
     # Set style
     app.setStyle("Fusion")
+
+    # Set application icon
+    icon_path = os.path.join(BASE_DIR, "resources", "icon.png")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
 
     # Create and show main window
     window = MainWindow()
