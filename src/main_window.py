@@ -654,17 +654,21 @@ class MainWindow(QMainWindow):
     def _check_unsaved(self) -> bool:
         """Check for unsaved changes. Returns True if should cancel."""
         if self._viewer.get_annotations().modified:
-            result = QMessageBox.question(
-                self, tr("Unsaved Changes"),
-                tr("There are unsaved changes. Do you want to save?"),
-                QMessageBox.StandardButton.Save |
-                QMessageBox.StandardButton.Discard |
-                QMessageBox.StandardButton.Cancel
-            )
-            if result == QMessageBox.StandardButton.Save:
+            msg = QMessageBox(self)
+            msg.setWindowTitle(tr("Unsaved Changes"))
+            msg.setText(tr("There are unsaved changes. Do you want to save?"))
+            msg.setIcon(QMessageBox.Icon.Question)
+
+            save_btn = msg.addButton(tr("Save"), QMessageBox.ButtonRole.AcceptRole)
+            discard_btn = msg.addButton(tr("Discard"), QMessageBox.ButtonRole.DestructiveRole)
+            cancel_btn = msg.addButton(tr("Cancel"), QMessageBox.ButtonRole.RejectRole)
+
+            msg.exec()
+
+            if msg.clickedButton() == save_btn:
                 self._save_file()
                 return False
-            elif result == QMessageBox.StandardButton.Cancel:
+            elif msg.clickedButton() == cancel_btn:
                 return True
         return False
 

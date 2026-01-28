@@ -73,6 +73,9 @@ TRANSLATIONS = {
         "Do you want to auto-decrease following numbers?": "Czy automatycznie zmniejszyć następne numery?",
         "Delete && decrease others": "Usuń i zmniejsz pozostałe",
         "Delete only": "Tylko usuń",
+        "Save": "Zapisz",
+        "Discard": "Odrzuć",
+        "Cancel": "Anuluj",
 
         # Error Messages
         "Error": "Błąd",
