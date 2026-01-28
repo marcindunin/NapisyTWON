@@ -231,19 +231,32 @@ class AnnotationStore:
         return sorted(result, key=lambda a: a.sort_key())
 
     def advance_numbers_from(self, from_number: str, delta: int = 1) -> list[tuple[NumberAnnotation, str, str]]:
-        """Advance all whole numbers >= from_number by delta.
+        """Advance all numbers >= from_number by delta.
 
+        Advances both whole numbers and sub-numbers (e.g., 6.1 -> 7.1).
+        Preserves 'p' suffix for empty markers.
         Returns list of (annotation, old_number, new_number) for undo.
         """
         changes = []
         target_main, _ = parse_number(from_number)
 
         for a in self._annotations.values():
-            main, sub = parse_number(a.number)
-            # Only advance whole numbers
-            if sub == 0 and main >= target_main:
+            # Check for 'p' suffix
+            has_p = a.number.endswith('p')
+            base_num = a.number[:-1] if has_p else a.number
+            main, sub = parse_number(base_num)
+
+            # Advance if main number >= target
+            if main >= target_main:
                 old_num = a.number
-                new_num = str(main + delta)
+                new_main = main + delta
+                if sub == 0:
+                    new_num = str(new_main)
+                else:
+                    new_num = f"{new_main}.{sub}"
+                # Preserve 'p' suffix
+                if has_p:
+                    new_num += 'p'
                 a.number = new_num
                 changes.append((a, old_num, new_num))
 
@@ -252,19 +265,32 @@ class AnnotationStore:
         return changes
 
     def decrease_numbers_from(self, from_number: str, delta: int = 1) -> list[tuple[NumberAnnotation, str, str]]:
-        """Decrease all whole numbers > from_number by delta.
+        """Decrease all numbers > from_number by delta.
 
+        Decreases both whole numbers and sub-numbers (e.g., 7.1 -> 6.1).
+        Preserves 'p' suffix for empty markers.
         Returns list of (annotation, old_number, new_number) for undo.
         """
         changes = []
         target_main, _ = parse_number(from_number)
 
         for a in self._annotations.values():
-            main, sub = parse_number(a.number)
-            # Only decrease whole numbers that are greater than target
-            if sub == 0 and main > target_main:
+            # Check for 'p' suffix
+            has_p = a.number.endswith('p')
+            base_num = a.number[:-1] if has_p else a.number
+            main, sub = parse_number(base_num)
+
+            # Decrease if main number > target
+            if main > target_main:
                 old_num = a.number
-                new_num = str(main - delta)
+                new_main = main - delta
+                if sub == 0:
+                    new_num = str(new_main)
+                else:
+                    new_num = f"{new_main}.{sub}"
+                # Preserve 'p' suffix
+                if has_p:
+                    new_num += 'p'
                 a.number = new_num
                 changes.append((a, old_num, new_num))
 

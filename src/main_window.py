@@ -283,13 +283,13 @@ class MainWindow(QMainWindow):
 
         # Tool mode buttons
         toolbar.addWidget(QLabel(tr(" Tool: ")))
-        self._insert_tool_btn = QPushButton(tr("Insert"))
+        self._insert_tool_btn = QPushButton(tr("Insert") + " (i)")
         self._insert_tool_btn.setCheckable(True)
         self._insert_tool_btn.setChecked(True)
         self._insert_tool_btn.clicked.connect(lambda: self._set_tool_mode(ToolMode.INSERT))
         toolbar.addWidget(self._insert_tool_btn)
 
-        self._select_tool_btn = QPushButton(tr("Select"))
+        self._select_tool_btn = QPushButton(tr("Select") + " (o)")
         self._select_tool_btn.setCheckable(True)
         self._select_tool_btn.clicked.connect(lambda: self._set_tool_mode(ToolMode.SELECT))
         toolbar.addWidget(self._select_tool_btn)
@@ -301,7 +301,7 @@ class MainWindow(QMainWindow):
         self._number_edit = QLineEdit()
         self._number_edit.setText("1")
         self._number_edit.setFixedWidth(70)
-        self._number_edit.editingFinished.connect(self._on_number_edited)
+        self._number_edit.textChanged.connect(self._on_number_edited)
         toolbar.addWidget(self._number_edit)
 
         # Empty mode checkbox (for "pusty" slides)
@@ -485,6 +485,14 @@ class MainWindow(QMainWindow):
         # 'P' key for toggling empty mode
         self._shortcut_p = QShortcut(QKeySequence("P"), self)
         self._shortcut_p.activated.connect(self._on_p_key_pressed)
+
+        # 'I' key for Insert tool
+        self._shortcut_i = QShortcut(QKeySequence("I"), self)
+        self._shortcut_i.activated.connect(lambda: self._set_tool_mode(ToolMode.INSERT))
+
+        # 'O' key for Select tool
+        self._shortcut_o = QShortcut(QKeySequence("O"), self)
+        self._shortcut_o.activated.connect(lambda: self._set_tool_mode(ToolMode.SELECT))
 
     def _on_p_key_pressed(self):
         """Handle 'P' key press for empty mode toggle."""
@@ -937,9 +945,11 @@ class MainWindow(QMainWindow):
         self._viewer.delete_annotation(annotation)
         self._refresh_annotation_panel()
 
-    def _on_number_edited(self):
+    def _on_number_edited(self, text=None):
         """Handle next number changed."""
-        text = self._number_edit.text().strip()
+        if text is None:
+            text = self._number_edit.text()
+        text = text.strip()
         if text:
             # Validate the number format (strip 'p' suffix for validation)
             base_text = text.rstrip('p')
