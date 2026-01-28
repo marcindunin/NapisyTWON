@@ -46,20 +46,29 @@ class NumberStyle:
     """Style settings for number annotations."""
     name: str = "Default"
     font_family: str = "Arial"
-    font_size: int = 48
+    font_size: int = 24
     text_color: str = "#000000"
-    bg_color: str = "#FFFF00"
+    bg_color: str = "#FFFFFF"
     bg_opacity: float = 1.0
     padding: int = 4
-    border_enabled: bool = False
-    border_width: int = 2
+    border_enabled: bool = True
+    border_width: int = 1
+    tail_enabled: bool = True
+    tail_length: int = 100
+    tail_width: int = 2
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> "NumberStyle":
-        return cls(**data)
+        # Create with defaults, then update with provided data
+        # This handles missing keys gracefully
+        style = cls()
+        for key, value in data.items():
+            if hasattr(style, key):
+                setattr(style, key, value)
+        return style
 
 
 @dataclass
@@ -72,6 +81,7 @@ class NumberAnnotation:
     number: str = "1"  # String to support decimals like "67.1"
     style: NumberStyle = field(default_factory=NumberStyle)
     pdf_annot_xref: int = 0  # PDF annotation xref for direct editing
+    pdf_tail_xref: int = 0  # PDF annotation xref for tail line
 
     def __post_init__(self):
         # Ensure number is always a string
@@ -303,28 +313,6 @@ class StylePresets:
     def __init__(self):
         self._presets: dict[str, NumberStyle] = {
             "Default": NumberStyle(),
-            "Red on White": NumberStyle(
-                name="Red on White",
-                text_color="#FF0000",
-                bg_color="#FFFFFF"
-            ),
-            "White on Black": NumberStyle(
-                name="White on Black",
-                text_color="#FFFFFF",
-                bg_color="#000000"
-            ),
-            "Large Yellow": NumberStyle(
-                name="Large Yellow",
-                font_size=72,
-                text_color="#000000",
-                bg_color="#FFFF00"
-            ),
-            "Subtle Gray": NumberStyle(
-                name="Subtle Gray",
-                text_color="#333333",
-                bg_color="#CCCCCC",
-                bg_opacity=0.7
-            ),
         }
 
     def get(self, name: str) -> Optional[NumberStyle]:

@@ -84,9 +84,13 @@ class PDFPreviewItem(QGraphicsPixmapItem):
         width = text_width + padding * 2
         height = text_height + padding * 2
 
+        # Add extra height for tail if enabled
+        tail_extra = style.tail_length if style.tail_enabled else 0
+        page_height = height + 10 + tail_extra
+
         # Create temporary PDF with annotation
         doc = fitz.open()
-        page = doc.new_page(width=width + 10, height=height + 10)
+        page = doc.new_page(width=width + 10, height=page_height)
 
         rect = fitz.Rect(5, 5, 5 + width, 5 + height)
 
@@ -118,9 +122,23 @@ class PDFPreviewItem(QGraphicsPixmapItem):
             doc.xref_set_key(annot_xref, "BS", f"<</W {style.border_width}/S/S>>")
             annot.update()
 
+        # Add tail line if enabled
+        if style.tail_enabled:
+            center_x = rect.x0 + (rect.width / 2)
+            start_y = rect.y1
+            end_y = start_y + style.tail_length
+
+            line_annot = page.add_line_annot(
+                fitz.Point(center_x, start_y),
+                fitz.Point(center_x, end_y)
+            )
+            line_annot.set_border(width=style.tail_width)
+            line_annot.set_colors(stroke=(0, 0, 0))
+            line_annot.update()
+
         # Render to pixmap
         mat = fitz.Matrix(self._scale, self._scale)
-        pix = page.get_pixmap(matrix=mat, clip=fitz.Rect(0, 0, width + 10, height + 10))
+        pix = page.get_pixmap(matrix=mat, clip=fitz.Rect(0, 0, width + 10, page_height))
 
         if pix.alpha:
             fmt = QImage.Format.Format_RGBA8888
@@ -135,8 +153,9 @@ class PDFPreviewItem(QGraphicsPixmapItem):
         self.setPixmap(pixmap)
         self._width = pixmap.width()
         self._height = pixmap.height()
-        # Center the pixmap on the cursor position
-        self.setOffset(-self._width / 2, -self._height / 2)
+        # Center the pixmap on the cursor position (center on the box, not including tail)
+        box_height = (height + 10) * self._scale
+        self.setOffset(-self._width / 2, -box_height / 2)
 
     def set_style(self, style: NumberStyle, number: str):
         self.style = style
@@ -223,6 +242,27 @@ class PDFViewer(QGraphicsView):
             return True
         except Exception as e:
             print(f"Error opening PDF: {e}")
+
+    def reload_document(self, path: str) -> bool:
+        """Reload document after save to get fresh xrefs."""
+        try:
+            # Close current document
+            if self._doc:
+                self._doc.close()
+
+            # Reopen
+            self._doc = fitz.open(path)
+            self._selected_annotation = None
+
+            # Load annotations from metadata (will sync xrefs)
+            if self.load_metadata_from_pdf():
+                print(f"Reloaded {len(self._annotations.all())} annotations after save")
+
+            self._render_page()
+            return True
+        except Exception as e:
+            print(f"Error reloading PDF: {e}")
+            return False
             return False
 
     def get_document(self) -> Optional[fitz.Document]:
@@ -372,12 +412,12 @@ class PDFViewer(QGraphicsView):
         if not self._doc:
             return
 
-        # Remove all existing FreeText annotations
+        # Remove all existing FreeText and Line annotations
         for page_num in range(self._doc.page_count):
             page = self._doc.load_page(page_num)
             annots_to_delete = []
             for annot in page.annots():
-                if annot.type[0] == fitz.PDF_ANNOT_FREE_TEXT:
+                if annot.type[0] in (fitz.PDF_ANNOT_FREE_TEXT, fitz.PDF_ANNOT_LINE):
                     annots_to_delete.append(annot)
             for annot in annots_to_delete:
                 page.delete_annot(annot)
@@ -448,6 +488,25 @@ class PDFViewer(QGraphicsView):
             annot.update()
 
         annotation.pdf_annot_xref = annot_xref
+
+        # Add tail line if enabled
+        if style.tail_enabled:
+            # Calculate line position: center bottom of rect, going down
+            center_x = rect.x0 + (rect.width / 2)
+            start_y = rect.y1  # bottom of rect
+            end_y = start_y + style.tail_length
+
+            line_annot = page.add_line_annot(
+                fitz.Point(center_x, start_y),
+                fitz.Point(center_x, end_y)
+            )
+            line_annot.set_border(width=style.tail_width)
+            line_annot.set_colors(stroke=(0, 0, 0))  # black
+            line_annot.update()
+            annotation.pdf_tail_xref = line_annot.xref
+        else:
+            annotation.pdf_tail_xref = 0
+
         return annot.xref
 
     def _delete_pdf_annotation(self, annotation: NumberAnnotation):
@@ -496,6 +555,14 @@ class PDFViewer(QGraphicsView):
 
         if annot_to_delete:
             page.delete_annot(annot_to_delete)
+
+        # Also delete tail annotation if exists
+        if annotation.pdf_tail_xref != 0:
+            for annot in page.annots():
+                if annot.xref == annotation.pdf_tail_xref:
+                    page.delete_annot(annot)
+                    break
+            annotation.pdf_tail_xref = 0
 
     def _move_pdf_annotation(self, annotation: NumberAnnotation, old_x: float, old_y: float):
         """Move an annotation in the PDF by updating its rect (preserves appearance)."""
@@ -549,6 +616,55 @@ class PDFViewer(QGraphicsView):
             )
             annot_to_move.set_rect(new_rect)
             annot_to_move.update()
+
+            # Also move tail annotation if exists - delete and recreate
+            if style.tail_enabled:
+                # Calculate old tail position for position-based search
+                old_center_x = old_rect.x0 + (old_rect.width / 2)
+                old_tail_start_y = old_rect.y1
+                old_tail_end_y = old_tail_start_y + style.tail_length
+
+                # Find and delete old tail
+                tail_to_delete = None
+                # Try by xref first
+                if annotation.pdf_tail_xref != 0:
+                    for annot in page.annots():
+                        if annot.xref == annotation.pdf_tail_xref:
+                            tail_to_delete = annot
+                            break
+
+                # Fallback to position matching
+                if tail_to_delete is None:
+                    for annot in page.annots():
+                        if annot.type[0] == fitz.PDF_ANNOT_LINE:
+                            vertices = annot.vertices
+                            if vertices and len(vertices) >= 2:
+                                start = vertices[0]  # tuple (x, y)
+                                end = vertices[1]
+                                if (abs(start[0] - old_center_x) < 3 and
+                                    abs(start[1] - old_tail_start_y) < 3 and
+                                    abs(end[0] - old_center_x) < 3 and
+                                    abs(end[1] - old_tail_end_y) < 3):
+                                    tail_to_delete = annot
+                                    break
+
+                if tail_to_delete:
+                    page.delete_annot(tail_to_delete)
+
+                # Create new tail at new position
+                center_x = new_rect.x0 + (new_rect.width / 2)
+                start_y = new_rect.y1
+                end_y = start_y + style.tail_length
+
+                line_annot = page.add_line_annot(
+                    fitz.Point(center_x, start_y),
+                    fitz.Point(center_x, end_y)
+                )
+                line_annot.set_border(width=style.tail_width)
+                line_annot.set_colors(stroke=(0, 0, 0))
+                line_annot.update()
+                annotation.pdf_tail_xref = line_annot.xref
+
             return True
 
         return False
@@ -827,6 +943,9 @@ class PDFViewer(QGraphicsView):
                 'padding': self._current_style.padding,
                 'border_enabled': self._current_style.border_enabled,
                 'border_width': self._current_style.border_width,
+                'tail_enabled': self._current_style.tail_enabled,
+                'tail_length': self._current_style.tail_length,
+                'tail_width': self._current_style.tail_width,
             })
         )
 
@@ -940,6 +1059,11 @@ class PDFViewer(QGraphicsView):
                 annotation.y + text_height + padding * 2
             )
 
+            # Calculate expected tail position
+            center_x = expected_rect.x0 + (expected_rect.width / 2)
+            tail_start_y = expected_rect.y1
+            tail_end_y = tail_start_y + style.tail_length
+
             # Find matching annotation in PDF
             page = self._doc.load_page(annotation.page)
             for annot in page.annots():
@@ -952,6 +1076,22 @@ class PDFViewer(QGraphicsView):
                         abs(annot_rect.y1 - expected_rect.y1) < 2):
                         annotation.pdf_annot_xref = annot.xref
                         break
+
+            # Find matching tail annotation (Line type)
+            if style.tail_enabled:
+                for annot in page.annots():
+                    if annot.type[0] == fitz.PDF_ANNOT_LINE:
+                        # Check if line starts at expected position
+                        vertices = annot.vertices
+                        if vertices and len(vertices) >= 2:
+                            start = vertices[0]  # tuple (x, y)
+                            end = vertices[1]
+                            if (abs(start[0] - center_x) < 3 and
+                                abs(start[1] - tail_start_y) < 3 and
+                                abs(end[0] - center_x) < 3 and
+                                abs(end[1] - tail_end_y) < 3):
+                                annotation.pdf_tail_xref = annot.xref
+                                break
 
     def save_metadata_to_pdf(self):
         """Save our annotation data as JSON in PDF metadata."""
