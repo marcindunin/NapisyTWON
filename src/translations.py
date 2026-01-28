@@ -120,6 +120,13 @@ TRANSLATIONS = {
         "Default": "Domyślny",
         "Main Toolbar": "Główny pasek narzędzi",
 
+        # Empty mode
+        "Empty (p)": "Pusty (p)",
+        "Empty mode ON": "Tryb pusty WŁĄCZONY",
+        "Empty mode OFF": "Tryb pusty WYŁĄCZONY",
+        "Toggled empty on": "Włączono pusty dla",
+        "Toggled empty off": "Wyłączono pusty dla",
+
         # Language menu
         "&Language": "&Język",
         "English": "English",

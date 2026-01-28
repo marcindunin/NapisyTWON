@@ -8,12 +8,15 @@ import re
 
 
 def parse_number(num_str: str) -> tuple[int, int]:
-    """Parse a number string like '67' or '67.1' into (main, sub) tuple.
+    """Parse a number string like '67', '67.1', '67p', or '67.1p' into (main, sub) tuple.
 
-    Returns (67, 0) for '67' and (67, 1) for '67.1'
+    Returns (67, 0) for '67' or '67p' and (67, 1) for '67.1' or '67.1p'
+    The 'p' suffix (for "pusty"/empty) is stripped before parsing.
     """
-    if '.' in str(num_str):
-        parts = str(num_str).split('.')
+    # Strip 'p' suffix if present
+    num_str = str(num_str).rstrip('p')
+    if '.' in num_str:
+        parts = num_str.split('.')
         return (int(parts[0]), int(parts[1]))
     return (int(num_str), 0)
 
@@ -141,9 +144,14 @@ class AnnotationStore:
         return self._annotations.get(annotation_id)
 
     def get_by_number(self, number: str) -> Optional[NumberAnnotation]:
-        """Find annotation by number."""
+        """Find annotation by number.
+
+        Considers base number (without 'p' suffix) for comparison.
+        """
+        base_number = str(number).rstrip('p')
         for a in self._annotations.values():
-            if a.number == str(number):
+            a_base = a.number.rstrip('p')
+            if a_base == base_number:
                 return a
         return None
 
@@ -197,8 +205,18 @@ class AnnotationStore:
         return str(max_main + 1)
 
     def has_number(self, number: str) -> bool:
-        """Check if a number already exists."""
-        return any(a.number == str(number) for a in self._annotations.values())
+        """Check if a number already exists.
+
+        Considers base number (without 'p' suffix) for comparison.
+        E.g., '36' and '36p' are considered the same number.
+        """
+        # Strip 'p' suffix for comparison
+        base_number = str(number).rstrip('p')
+        for a in self._annotations.values():
+            a_base = a.number.rstrip('p')
+            if a_base == base_number:
+                return True
+        return False
 
     def get_numbers_from(self, number: str) -> list[NumberAnnotation]:
         """Get all annotations with number >= given number (whole numbers only)."""

@@ -132,6 +132,7 @@ class MainWindow(QMainWindow):
         self._undo_manager = UndoManager()
         self._recent_files: list[str] = []
         self._max_recent = 10
+        self._empty_mode = False  # For "pusty" (empty) slide marking
 
         # Settings
         self._settings = QSettings("NapisyTWON", "NapisyTWON")
@@ -299,6 +300,14 @@ class MainWindow(QMainWindow):
         self._number_edit.setFixedWidth(70)
         self._number_edit.editingFinished.connect(self._on_number_edited)
         toolbar.addWidget(self._number_edit)
+
+        # Empty mode checkbox (for "pusty" slides)
+        from PySide6.QtWidgets import QCheckBox
+        self._empty_check = QCheckBox(tr("Empty (p)"))
+        self._empty_check.setChecked(False)
+        self._empty_check.setToolTip("Press 'p' to toggle")
+        self._empty_check.stateChanged.connect(self._on_empty_mode_changed)
+        toolbar.addWidget(self._empty_check)
 
         toolbar.addSeparator()
 
@@ -721,7 +730,6 @@ class MainWindow(QMainWindow):
         """Enable/disable file-related actions."""
         self.action_save.setEnabled(enabled)
         self.action_save_as.setEnabled(enabled)
-        self.action_export_image.setEnabled(enabled)
 
     def _update_title(self):
         """Update window title."""
@@ -811,12 +819,28 @@ class MainWindow(QMainWindow):
 
     def _on_annotation_added(self, annotation: NumberAnnotation):
         """Handle new annotation added."""
-        # Update next number field
-        main, sub = parse_number(annotation.number)
-        if sub == 0:
-            self._number_edit.setText(str(main + 1))
+        # Check if this was an "empty" annotation (ends with 'p')
+        num = annotation.number
+        if num.endswith('p'):
+            base_num = num[:-1]
+            # Reset empty mode after inserting
+            self._empty_mode = False
+            self._empty_check.blockSignals(True)
+            self._empty_check.setChecked(False)
+            self._empty_check.blockSignals(False)
         else:
-            self._number_edit.setText(f"{main}.{sub + 1}")
+            base_num = num
+
+        # Update next number field (strip 'p' for calculation)
+        try:
+            main, sub = parse_number(base_num)
+            if sub == 0:
+                self._number_edit.setText(str(main + 1))
+            else:
+                self._number_edit.setText(f"{main}.{sub + 1}")
+        except (ValueError, IndexError):
+            # If parsing fails, just increment based on the raw number
+            pass
 
         self._update_title()
         self._refresh_annotation_panel()
@@ -897,13 +921,89 @@ class MainWindow(QMainWindow):
         """Handle next number changed."""
         text = self._number_edit.text().strip()
         if text:
-            # Validate the number format
+            # Validate the number format (strip 'p' suffix for validation)
+            base_text = text.rstrip('p')
             try:
-                parse_number(text)
-                self._viewer.set_next_number(text)
+                parse_number(base_text)
+                # Update preview with empty suffix if needed
+                display_number = base_text + ('p' if self._empty_mode else '')
+                self._viewer.set_next_number(display_number)
             except (ValueError, IndexError):
                 # Invalid format, reset to current
                 pass
+
+    def _on_empty_mode_changed(self, state):
+        """Handle empty mode checkbox changed."""
+        self._empty_mode = bool(state)
+        self._update_preview_number()
+        mode_str = tr("Empty mode ON") if self._empty_mode else tr("Empty mode OFF")
+        self._statusbar.showMessage(mode_str)
+
+    def _update_preview_number(self):
+        """Update the preview number with or without 'p' suffix."""
+        text = self._number_edit.text().strip().rstrip('p')
+        if text:
+            display_number = text + ('p' if self._empty_mode else '')
+            self._viewer.set_next_number(display_number)
+
+    def _toggle_empty_mode(self):
+        """Toggle empty mode state."""
+        self._empty_mode = not self._empty_mode
+        self._empty_check.blockSignals(True)
+        self._empty_check.setChecked(self._empty_mode)
+        self._empty_check.blockSignals(False)
+        self._update_preview_number()
+        mode_str = tr("Empty mode ON") if self._empty_mode else tr("Empty mode OFF")
+        self._statusbar.showMessage(mode_str)
+
+    def _toggle_annotation_empty(self, annotation: NumberAnnotation):
+        """Toggle 'p' suffix on an annotation."""
+        old_num = annotation.number
+        if old_num.endswith('p'):
+            new_num = old_num[:-1]
+            status = f"{tr('Toggled empty off')} #{new_num}"
+        else:
+            new_num = old_num + 'p'
+            status = f"{tr('Toggled empty on')} #{new_num}"
+
+        annotation.number = new_num
+
+        # Update PDF annotation
+        self._viewer._delete_pdf_annotation(annotation)
+        self._viewer._add_pdf_annotation(annotation)
+        self._viewer.get_annotations().modified = True
+
+        self._viewer.refresh_page()
+        self._viewer.select_annotation(annotation)
+        self._refresh_annotation_panel()
+        self._update_title()
+
+        # Add undo action
+        action = UndoAction(
+            description=f"Toggle empty #{old_num} to #{new_num}",
+            undo_data=(annotation, old_num, new_num),
+            redo_data=(annotation, new_num, old_num),
+            undo_func=lambda d: self._restore_number(d[0], d[1]),
+            redo_func=lambda d: self._restore_number(d[0], d[1])
+        )
+        self._undo_manager.push(action)
+
+        self._statusbar.showMessage(status)
+
+    def keyPressEvent(self, event):
+        """Handle key press events."""
+        if event.key() == Qt.Key.Key_P and not event.modifiers():
+            # Check if an annotation is selected
+            selected = self._viewer._selected_annotation
+            if selected:
+                # Toggle 'p' suffix on selected annotation
+                self._toggle_annotation_empty(selected)
+            else:
+                # Toggle empty mode for next insertion
+                self._toggle_empty_mode()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _set_tool_mode(self, mode: ToolMode):
         """Set the current tool mode."""
