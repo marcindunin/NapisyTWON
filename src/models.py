@@ -81,10 +81,11 @@ class NumberAnnotation:
     page: int = 0
     x: float = 0.0  # PDF coordinates
     y: float = 0.0
-    number: str = "1"  # String to support decimals like "67.1"
+    number: str = "1"  # String to support decimals like "67.1" and empty marker "67p"
     style: NumberStyle = field(default_factory=NumberStyle)
     pdf_annot_xref: int = 0  # PDF annotation xref for direct editing
     pdf_tail_xref: int = 0  # PDF annotation xref for tail line
+    pdf_p_xref: int = 0  # PDF annotation xref for small 'p' subscript (empty marker)
 
     def __post_init__(self):
         # Ensure number is always a string
