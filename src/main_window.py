@@ -1,5 +1,6 @@
 """Main application window."""
 
+import logging
 import os
 import json
 from pathlib import Path
@@ -20,6 +21,8 @@ from .annotation_list import AnnotationListPanel
 from .models import NumberAnnotation, NumberStyle, AnnotationStore, StylePresets, parse_number
 from .undo_manager import UndoManager, UndoAction
 from .translations import tr, Translator
+
+logger = logging.getLogger(__name__)
 
 
 class StylePresetDialog(QDialog):
@@ -497,7 +500,7 @@ class MainWindow(QMainWindow):
     def _on_p_key_pressed(self):
         """Handle 'P' key press for empty mode toggle."""
         # Check if an annotation is selected
-        selected = self._viewer._selected_annotation
+        selected = self._viewer.get_selected_annotation()
         if selected:
             # Toggle 'p' suffix on selected annotation
             self._toggle_annotation_empty(selected)
@@ -526,8 +529,8 @@ class MainWindow(QMainWindow):
         if presets_json:
             try:
                 self._presets.from_json(presets_json)
-            except:
-                pass
+            except (json.JSONDecodeError, TypeError, KeyError) as e:
+                logger.warning("Failed to load style presets: %s", e)
 
         # Current style
         style_json = self._settings.value("current_style")
@@ -535,8 +538,8 @@ class MainWindow(QMainWindow):
             try:
                 data = json.loads(style_json)
                 self._style = NumberStyle.from_dict(data)
-            except:
-                pass
+            except (json.JSONDecodeError, TypeError, KeyError) as e:
+                logger.warning("Failed to load saved style: %s", e)
 
     def _save_settings(self):
         """Save application settings."""
@@ -738,7 +741,10 @@ class MainWindow(QMainWindow):
 
             # Annotations are already in the PDF (direct editing mode)
             # Just save the document
-            doc.save(path, garbage=4, deflate=True)
+            if path == self._current_file:
+                doc.save(path, incremental=True, encryption=fitz.PDF_ENCRYPT_KEEP)
+            else:
+                doc.save(path, garbage=4, deflate=True)
 
             # Reload the document to get fresh xrefs after garbage collection
             # This ensures annotations can be found and moved properly
@@ -999,9 +1005,7 @@ class MainWindow(QMainWindow):
         annotation.number = new_num
 
         # Update PDF annotation
-        self._viewer._delete_pdf_annotation(annotation)
-        self._viewer._add_pdf_annotation(annotation)
-        self._viewer.get_annotations().modified = True
+        self._viewer.update_pdf_annotation(annotation)
 
         self._viewer.refresh_page()
         self._viewer.select_annotation(annotation)
@@ -1060,7 +1064,7 @@ class MainWindow(QMainWindow):
     def _apply_style_to_selected(self):
         """Apply current style to the selected annotation."""
         # Get selected annotation from viewer
-        annotation = self._viewer._selected_annotation
+        annotation = self._viewer.get_selected_annotation()
         if not annotation:
             return
 
@@ -1077,9 +1081,7 @@ class MainWindow(QMainWindow):
         annotation.style.tail_width = self._style.tail_width
 
         # Update PDF annotation (delete old, create new with new style)
-        self._viewer._delete_pdf_annotation(annotation)
-        self._viewer._add_pdf_annotation(annotation)
-        self._viewer.get_annotations().modified = True
+        self._viewer.update_pdf_annotation(annotation)
 
         # Refresh display
         self._viewer.refresh_page()
@@ -1172,8 +1174,7 @@ class MainWindow(QMainWindow):
 
             # Update PDF annotations for all changed numbers
             for changed_ann, _, _ in changes:
-                self._viewer._delete_pdf_annotation(changed_ann)
-                self._viewer._add_pdf_annotation(changed_ann)
+                self._viewer.update_pdf_annotation(changed_ann)
 
             # Now insert the annotation with the original number
             self._viewer.insert_annotation_at(pdf_x, pdf_y, number)
@@ -1254,12 +1255,10 @@ class MainWindow(QMainWindow):
 
             # Update PDF annotations for all changed numbers
             for changed_ann, _, _ in changes:
-                self._viewer._delete_pdf_annotation(changed_ann)
-                self._viewer._add_pdf_annotation(changed_ann)
+                self._viewer.update_pdf_annotation(changed_ann)
 
             annotation.number = new_num
-            self._viewer._delete_pdf_annotation(annotation)
-            self._viewer._add_pdf_annotation(annotation)
+            self._viewer.update_pdf_annotation(annotation)
 
             self._viewer.refresh_page()
             self._refresh_annotation_panel()
@@ -1278,9 +1277,7 @@ class MainWindow(QMainWindow):
         annotation.number = new_num
 
         # Update PDF annotation (delete old, create new with new number)
-        self._viewer._delete_pdf_annotation(annotation)
-        self._viewer._add_pdf_annotation(annotation)
-        self._viewer.get_annotations().modified = True
+        self._viewer.update_pdf_annotation(annotation)
 
         self._viewer.refresh_page()
         self._refresh_annotation_panel()
@@ -1303,8 +1300,7 @@ class MainWindow(QMainWindow):
         annotation.number = number
 
         # Update PDF annotation
-        self._viewer._delete_pdf_annotation(annotation)
-        self._viewer._add_pdf_annotation(annotation)
+        self._viewer.update_pdf_annotation(annotation)
 
         self._viewer.refresh_page()
         self._refresh_annotation_panel()
@@ -1336,8 +1332,7 @@ class MainWindow(QMainWindow):
 
                 # Update PDF annotations for all changed numbers
                 for changed_ann, _, _ in changes:
-                    self._viewer._delete_pdf_annotation(changed_ann)
-                    self._viewer._add_pdf_annotation(changed_ann)
+                    self._viewer.update_pdf_annotation(changed_ann)
 
                 self._viewer.delete_annotation(annotation)
                 self._viewer.refresh_page()

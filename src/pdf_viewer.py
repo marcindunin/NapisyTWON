@@ -4,6 +4,7 @@ This version edits the PDF directly - annotations are added to the PDF document
 and rendered as part of the page, ensuring consistency with other PDF readers.
 """
 
+import logging
 import fitz
 from enum import Enum
 from PySide6.QtWidgets import (
@@ -26,6 +27,8 @@ class ToolMode(Enum):
 
 # Metadata key for storing our annotation data in PDF
 NAPISY_METADATA_KEY = "NapisyTWON_Annotations"
+
+logger = logging.getLogger(__name__)
 
 
 class SelectionOverlay(QGraphicsRectItem):
@@ -266,12 +269,13 @@ class PDFViewer(QGraphicsView):
 
             # Try to load our annotation metadata from PDF
             if self.load_metadata_from_pdf():
-                print(f"Loaded {len(self._annotations.all())} annotations from PDF metadata")
+                logger.info("Loaded %d annotations from PDF metadata", len(self._annotations.all()))
 
             self._render_page()
             return True
         except Exception as e:
-            print(f"Error opening PDF: {e}")
+            logger.error("Error opening PDF: %s", e)
+            return False
 
     def reload_document(self, path: str) -> bool:
         """Reload document after save to get fresh xrefs."""
@@ -286,13 +290,12 @@ class PDFViewer(QGraphicsView):
 
             # Load annotations from metadata (will sync xrefs)
             if self.load_metadata_from_pdf():
-                print(f"Reloaded {len(self._annotations.all())} annotations after save")
+                logger.info("Reloaded %d annotations after save", len(self._annotations.all()))
 
             self._render_page()
             return True
         except Exception as e:
-            print(f"Error reloading PDF: {e}")
-            return False
+            logger.error("Error reloading PDF: %s", e)
             return False
 
     def get_document(self) -> Optional[fitz.Document]:
@@ -1138,6 +1141,16 @@ class PDFViewer(QGraphicsView):
         self._annotations.add(annotation)
         self._render_page()
 
+    def update_pdf_annotation(self, annotation: NumberAnnotation):
+        """Delete and re-create a PDF annotation (public API for style/number changes)."""
+        self._delete_pdf_annotation(annotation)
+        self._add_pdf_annotation(annotation)
+        self._annotations.modified = True
+
+    def get_selected_annotation(self) -> Optional[NumberAnnotation]:
+        """Return the currently selected annotation, or None."""
+        return self._selected_annotation
+
     def refresh_page(self):
         """Refresh the current page display."""
         self._render_page()
@@ -1294,7 +1307,7 @@ class PDFViewer(QGraphicsView):
             return True
 
         except Exception as e:
-            print(f"Error loading metadata: {e}")
+            logger.error("Error loading metadata: %s", e)
             return False
 
     def _sync_xrefs_by_name(self):

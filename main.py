@@ -4,6 +4,7 @@
 A modern PDF annotation tool for adding numbered labels to PDF documents.
 """
 
+import logging
 import sys
 import os
 
@@ -24,6 +25,11 @@ from src.main_window import MainWindow
 
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
     # High DPI support
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
