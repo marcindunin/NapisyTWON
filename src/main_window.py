@@ -6,13 +6,13 @@ import json
 from pathlib import Path
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QToolBar,
-    QLabel, QSpinBox, QDoubleSpinBox, QComboBox, QPushButton,
+    QLabel, QSpinBox, QDoubleSpinBox, QPushButton,
     QColorDialog, QFileDialog, QMessageBox, QStatusBar, QSplitter,
     QFrame, QMenu, QGroupBox, QFormLayout, QDialog, QDialogButtonBox,
-    QLineEdit, QListWidget, QListWidgetItem, QApplication
+    QLineEdit, QListWidget, QListWidgetItem, QApplication, QCheckBox
 )
-from PySide6.QtCore import Qt, QSettings, QTimer, Signal
-from PySide6.QtGui import QAction, QIcon, QColor, QKeySequence, QFont, QFontDatabase, QShortcut
+from PySide6.QtCore import Qt, QSettings, QTimer, Signal, QEvent
+from PySide6.QtGui import QAction, QIcon, QColor, QKeySequence, QFont, QShortcut
 from typing import Optional
 import fitz
 
@@ -94,6 +94,11 @@ class StylePresetDialog(QDialog):
             'bg_color': self.current_style.bg_color,
             'bg_opacity': self.current_style.bg_opacity,
             'padding': self.current_style.padding,
+            'border_enabled': self.current_style.border_enabled,
+            'border_width': self.current_style.border_width,
+            'tail_enabled': self.current_style.tail_enabled,
+            'tail_length': self.current_style.tail_length,
+            'tail_width': self.current_style.tail_width,
         })
         self.presets.save(style)
         self._populate_list()
@@ -308,7 +313,6 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._number_edit)
 
         # Empty mode checkbox (for "pusty" slides)
-        from PySide6.QtWidgets import QCheckBox
         self._empty_check = QCheckBox(tr("Empty (p)"))
         self._empty_check.setChecked(False)
         self._empty_check.setToolTip("Press 'p' to toggle")
@@ -316,16 +320,6 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._empty_check)
 
         toolbar.addSeparator()
-
-        # Font
-        toolbar.addWidget(QLabel(tr(" Font: ")))
-        self._font_combo = QComboBox()
-        self._font_combo.setFixedWidth(150)
-        families = QFontDatabase.families()
-        self._font_combo.addItems(sorted(families))
-        self._font_combo.setCurrentText("Arial")
-        self._font_combo.currentTextChanged.connect(self._on_style_changed)
-        toolbar.addWidget(self._font_combo)
 
         # Size
         toolbar.addWidget(QLabel(tr(" Size: ")))
@@ -366,7 +360,6 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         # Border settings
-        from PySide6.QtWidgets import QCheckBox
         self._border_check = QCheckBox(tr("Border"))
         self._border_check.setChecked(True)  # Match NumberStyle default
         self._border_check.stateChanged.connect(self._on_style_changed)
@@ -438,6 +431,12 @@ class MainWindow(QMainWindow):
         # Zoom indicator
         self._zoom_label = QLabel(f" {tr('Zoom:')} 100% ")
         toolbar.addWidget(self._zoom_label)
+
+        # Intercept arrow keys on all toolbar input widgets so they always navigate pages
+        for widget in (self._number_edit, self._size_spin, self._opacity_spin,
+                       self._border_width_spin, self._tail_length_spin,
+                       self._tail_width_spin, self._page_spin):
+            widget.installEventFilter(self)
 
     def _create_central_widget(self):
         """Create the central widget with splitter."""
@@ -571,7 +570,6 @@ class MainWindow(QMainWindow):
         self._style = NumberStyle()
 
         # Block signals to prevent partial updates
-        self._font_combo.blockSignals(True)
         self._size_spin.blockSignals(True)
         self._opacity_spin.blockSignals(True)
         self._border_check.blockSignals(True)
@@ -581,7 +579,6 @@ class MainWindow(QMainWindow):
         self._tail_width_spin.blockSignals(True)
 
         # Apply all settings
-        self._font_combo.setCurrentText(self._style.font_family)
         self._size_spin.setValue(self._style.font_size)
         self._text_color_btn.setStyleSheet(f"background-color: {self._style.text_color};")
         self._bg_color_btn.setStyleSheet(f"background-color: {self._style.bg_color};")
@@ -593,7 +590,6 @@ class MainWindow(QMainWindow):
         self._tail_width_spin.setValue(self._style.tail_width)
 
         # Unblock signals
-        self._font_combo.blockSignals(False)
         self._size_spin.blockSignals(False)
         self._opacity_spin.blockSignals(False)
         self._border_check.blockSignals(False)
@@ -607,7 +603,6 @@ class MainWindow(QMainWindow):
 
     def _apply_settings(self):
         """Apply loaded settings to UI."""
-        self._font_combo.setCurrentText(self._style.font_family)
         self._size_spin.setValue(self._style.font_size)
         self._text_color_btn.setStyleSheet(f"background-color: {self._style.text_color};")
         self._bg_color_btn.setStyleSheet(f"background-color: {self._style.bg_color};")
@@ -806,7 +801,6 @@ class MainWindow(QMainWindow):
     def _load_style_to_controls(self, style: NumberStyle):
         """Load a style's settings into the toolbar controls."""
         # Block signals to avoid triggering changes
-        self._font_combo.blockSignals(True)
         self._size_spin.blockSignals(True)
         self._opacity_spin.blockSignals(True)
         self._border_check.blockSignals(True)
@@ -815,7 +809,6 @@ class MainWindow(QMainWindow):
         self._tail_length_spin.blockSignals(True)
         self._tail_width_spin.blockSignals(True)
 
-        self._font_combo.setCurrentText(style.font_family)
         self._size_spin.setValue(style.font_size)
         self._text_color_btn.setStyleSheet(f"background-color: {style.text_color};")
         self._bg_color_btn.setStyleSheet(f"background-color: {style.bg_color};")
@@ -829,7 +822,6 @@ class MainWindow(QMainWindow):
         # Update internal style
         self._style = NumberStyle(
             name=style.name,
-            font_family=style.font_family,
             font_size=style.font_size,
             text_color=style.text_color,
             bg_color=style.bg_color,
@@ -842,7 +834,6 @@ class MainWindow(QMainWindow):
             tail_width=style.tail_width
         )
 
-        self._font_combo.blockSignals(False)
         self._size_spin.blockSignals(False)
         self._opacity_spin.blockSignals(False)
         self._border_check.blockSignals(False)
@@ -920,10 +911,9 @@ class MainWindow(QMainWindow):
         """Move an annotation to a position."""
         annotation.x = x
         annotation.y = y
-        # Refresh display
-        page = self._viewer.current_page()
-        if annotation.page == page:
-            self._viewer.go_to_page(page)
+        # Update the PDF annotation to match new position
+        self._viewer.update_pdf_annotation(annotation)
+        self._viewer.refresh_page()
 
     def _on_annotation_deleted(self, annotation: NumberAnnotation):
         """Handle annotation deleted."""
@@ -1035,7 +1025,6 @@ class MainWindow(QMainWindow):
 
     def _on_style_changed(self):
         """Handle style settings changed."""
-        self._style.font_family = self._font_combo.currentText()
         self._style.font_size = self._size_spin.value()
         self._style.bg_opacity = self._opacity_spin.value()
         self._style.border_enabled = self._border_check.isChecked()
@@ -1126,11 +1115,7 @@ class MainWindow(QMainWindow):
 
     def _delete_selected(self):
         """Delete selected annotation."""
-        # Trigger delete in viewer via key event
-        from PySide6.QtGui import QKeyEvent
-        from PySide6.QtCore import QEvent
-        event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier)
-        self._viewer.keyPressEvent(event)
+        self._viewer._delete_selected_annotation()
 
     def _clear_all(self):
         """Clear all annotations."""
@@ -1353,6 +1338,17 @@ class MainWindow(QMainWindow):
             )
             if result == QMessageBox.StandardButton.Yes:
                 self._viewer.delete_annotation(annotation)
+
+    def eventFilter(self, obj, event):
+        """Intercept Left/Right arrow keys on toolbar widgets to always navigate pages."""
+        if event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Left:
+                self._viewer.prev_page()
+                return True
+            elif event.key() == Qt.Key.Key_Right:
+                self._viewer.next_page()
+                return True
+        return super().eventFilter(obj, event)
 
     def closeEvent(self, event):
         """Handle window close."""

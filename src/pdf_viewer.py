@@ -4,6 +4,7 @@ This version edits the PDF directly - annotations are added to the PDF document
 and rendered as part of the page, ensuring consistency with other PDF readers.
 """
 
+import json
 import logging
 import fitz
 from enum import Enum
@@ -28,7 +29,42 @@ class ToolMode(Enum):
 # Metadata key for storing our annotation data in PDF
 NAPISY_METADATA_KEY = "NapisyTWON_Annotations"
 
+# Cached font instance for text measurement
+_HELV_FONT = fitz.Font("helv")
+
 logger = logging.getLogger(__name__)
+
+
+def hex_to_rgb(hex_color: str) -> tuple[float, float, float]:
+    """Convert hex color string to (r, g, b) tuple with values 0.0-1.0."""
+    hex_color = hex_color.lstrip('#')
+    return tuple(int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+
+def calc_annotation_rect(annotation: NumberAnnotation) -> tuple[fitz.Rect, str, bool, int, float, float]:
+    """Calculate the PDF rect and text metrics for an annotation.
+
+    Returns (rect, base_text, has_p_suffix, p_fontsize, text_width, text_height).
+    """
+    style = annotation.style
+    text = str(annotation.number)
+    has_p_suffix = text.endswith('p')
+    base_text = text[:-1] if has_p_suffix else text
+    p_fontsize = int(style.font_size * 0.5)
+
+    base_width = _HELV_FONT.text_length(base_text, fontsize=style.font_size)
+    p_width = _HELV_FONT.text_length('p', fontsize=p_fontsize) if has_p_suffix else 0
+    text_width = base_width + p_width
+    text_height = style.font_size
+    padding = style.padding
+
+    rect = fitz.Rect(
+        annotation.x,
+        annotation.y,
+        annotation.x + text_width + padding * 2,
+        annotation.y + text_height + padding * 2,
+    )
+    return rect, base_text, has_p_suffix, p_fontsize, text_width, text_height
 
 
 class SelectionOverlay(QGraphicsRectItem):
@@ -75,21 +111,15 @@ class PDFPreviewItem(QGraphicsPixmapItem):
 
     def _render_preview(self):
         """Render a preview using actual PDF annotation."""
-        text = str(self.number)
         style = self.style
 
-        # Check if number ends with 'p' (empty/pusty marker)
-        has_p_suffix = text.endswith('p')
-        base_text = text[:-1] if has_p_suffix else text
-        p_fontsize = int(style.font_size * 0.5)  # 'p' is 50% size
+        # Use a temporary annotation object for calc_annotation_rect
+        tmp = NumberAnnotation(number=str(self.number), style=style)
+        tmp_rect, base_text, has_p_suffix, p_fontsize, text_width, text_height = calc_annotation_rect(tmp)
 
-        # Calculate dimensions
-        font = fitz.Font("helv")
-        base_width = font.text_length(base_text, fontsize=style.font_size)
-        p_width = font.text_length('p', fontsize=p_fontsize) if has_p_suffix else 0
-        text_width = base_width + p_width
-        text_height = style.font_size
         padding = style.padding
+        base_width = _HELV_FONT.text_length(base_text, fontsize=style.font_size)
+        p_width = _HELV_FONT.text_length('p', fontsize=p_fontsize) if has_p_suffix else 0
 
         width = text_width + padding * 2
         height = text_height + padding * 2
@@ -103,10 +133,6 @@ class PDFPreviewItem(QGraphicsPixmapItem):
         page = doc.new_page(width=width + 10, height=page_height)
 
         rect = fitz.Rect(5, 5, 5 + width, 5 + height)
-
-        def hex_to_rgb(hex_color):
-            hex_color = hex_color.lstrip('#')
-            return tuple(int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
 
         fg_rgb = hex_to_rgb(style.text_color)
         bg_rgb = hex_to_rgb(style.bg_color) if style.bg_opacity > 0 else None
@@ -361,7 +387,7 @@ class PDFViewer(QGraphicsView):
         else:
             fmt = QImage.Format.Format_RGB888
 
-        img = QImage(pix.samples, pix.width, pix.height, pix.stride, fmt)
+        img = QImage(pix.samples, pix.width, pix.height, pix.stride, fmt).copy()
         pixmap = QPixmap.fromImage(img)
 
         # Update scene
@@ -391,25 +417,12 @@ class PDFViewer(QGraphicsView):
         if not self._selection_overlay:
             return
 
-        # Calculate rect from annotation
-        style = annotation.style
-        text = str(annotation.number)
-        # Handle 'p' suffix for width calculation
-        base_text = text[:-1] if text.endswith('p') else text
-        has_p_suffix = text.endswith('p')
-        p_fontsize = int(style.font_size * 0.5)
-
-        font = fitz.Font("helv")
-        base_width = font.text_length(base_text, fontsize=style.font_size)
-        p_width = font.text_length('p', fontsize=p_fontsize) if has_p_suffix else 0
-        text_width = base_width + p_width
-        text_height = style.font_size
-        padding = style.padding
+        rect, *_ = calc_annotation_rect(annotation)
 
         x = annotation.x * self._zoom
         y = annotation.y * self._zoom
-        w = (text_width + padding * 2) * self._zoom
-        h = (text_height + padding * 2) * self._zoom
+        w = rect.width * self._zoom
+        h = rect.height * self._zoom
 
         self._selection_overlay.setRect(0, 0, w, h)
         self._selection_overlay.setPos(x, y)
@@ -472,32 +485,10 @@ class PDFViewer(QGraphicsView):
 
         page = self._doc.load_page(annotation.page)
         style = annotation.style
-        text = str(annotation.number)
-
-        # Check if number ends with 'p' (empty/pusty marker)
-        has_p_suffix = text.endswith('p')
-        base_text = text[:-1] if has_p_suffix else text
-        p_fontsize = int(style.font_size * 0.5)  # 'p' is 50% size
-
-        # Calculate rect
-        font = fitz.Font("helv")
-        base_width = font.text_length(base_text, fontsize=style.font_size)
-        p_width = font.text_length('p', fontsize=p_fontsize) if has_p_suffix else 0
-        text_width = base_width + p_width
-        text_height = style.font_size
+        rect, base_text, has_p_suffix, p_fontsize, text_width, text_height = calc_annotation_rect(annotation)
         padding = style.padding
-
-        rect = fitz.Rect(
-            annotation.x,
-            annotation.y,
-            annotation.x + text_width + padding * 2,
-            annotation.y + text_height + padding * 2
-        )
-
-        # Convert colors
-        def hex_to_rgb(hex_color):
-            hex_color = hex_color.lstrip('#')
-            return tuple(int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        base_width = _HELV_FONT.text_length(base_text, fontsize=style.font_size)
+        p_width = _HELV_FONT.text_length('p', fontsize=p_fontsize) if has_p_suffix else 0
 
         fg_rgb = hex_to_rgb(style.text_color)
         bg_rgb = hex_to_rgb(style.bg_color) if style.bg_opacity > 0 else None
@@ -561,9 +552,8 @@ class PDFViewer(QGraphicsView):
 
         # Add tail line if enabled
         if style.tail_enabled:
-            # Calculate line position: center bottom of rect, going down
             center_x = rect.x0 + (rect.width / 2)
-            start_y = rect.y1  # bottom of rect
+            start_y = rect.y1
             end_y = start_y + style.tail_length
 
             line_annot = page.add_line_annot(
@@ -571,7 +561,7 @@ class PDFViewer(QGraphicsView):
                 fitz.Point(center_x, end_y)
             )
             line_annot.set_border(width=style.tail_width)
-            line_annot.set_colors(stroke=(0, 0, 0))  # black
+            line_annot.set_colors(stroke=(0, 0, 0))
             line_annot.update()
             annotation.pdf_tail_xref = line_annot.xref
         else:
@@ -586,27 +576,7 @@ class PDFViewer(QGraphicsView):
 
         page = self._doc.load_page(annotation.page)
 
-        # Calculate expected rect for position-based matching
-        style = annotation.style
-        text = str(annotation.number)
-        # Strip 'p' suffix for rect calculation (main annotation doesn't include 'p')
-        base_text = text[:-1] if text.endswith('p') else text
-        has_p_suffix = text.endswith('p')
-        p_fontsize = int(style.font_size * 0.5)
-
-        font = fitz.Font("helv")
-        base_width = font.text_length(base_text, fontsize=style.font_size)
-        p_width = font.text_length('p', fontsize=p_fontsize) if has_p_suffix else 0
-        text_width = base_width + p_width
-        text_height = style.font_size
-        padding = style.padding
-
-        expected_rect = fitz.Rect(
-            annotation.x,
-            annotation.y,
-            annotation.x + text_width + padding * 2,
-            annotation.y + text_height + padding * 2
-        )
+        expected_rect, *_ = calc_annotation_rect(annotation)
 
         annot_to_delete = None
 
@@ -656,23 +626,14 @@ class PDFViewer(QGraphicsView):
 
         page = self._doc.load_page(annotation.page)
 
-        # Calculate old rect to find the annotation
         style = annotation.style
-        text = str(annotation.number)
-        # Strip 'p' suffix for rect calculation
-        base_text = text[:-1] if text.endswith('p') else text
-        has_p_suffix = text.endswith('p')
-        p_fontsize = int(style.font_size * 0.5)
-
-        font = fitz.Font("helv")
-        base_width = font.text_length(base_text, fontsize=style.font_size)
-        p_width = font.text_length('p', fontsize=p_fontsize) if has_p_suffix else 0
-        text_width = base_width + p_width
-        text_height = style.font_size
+        new_rect, base_text, has_p_suffix, p_fontsize, text_width, text_height = calc_annotation_rect(annotation)
         padding = style.padding
+        base_width = _HELV_FONT.text_length(base_text, fontsize=style.font_size)
+        p_width = _HELV_FONT.text_length('p', fontsize=p_fontsize) if has_p_suffix else 0
 
-        width = text_width + padding * 2
-        height = text_height + padding * 2
+        width = new_rect.width
+        height = new_rect.height
 
         old_rect = fitz.Rect(old_x, old_y, old_x + width, old_y + height)
 
@@ -699,13 +660,6 @@ class PDFViewer(QGraphicsView):
                         break
 
         if annot_to_move:
-            # Calculate new rect
-            new_rect = fitz.Rect(
-                annotation.x,
-                annotation.y,
-                annotation.x + width,
-                annotation.y + height
-            )
             annot_to_move.set_rect(new_rect)
             annot_to_move.update()
 
@@ -716,11 +670,6 @@ class PDFViewer(QGraphicsView):
                     if annot.xref == annotation.pdf_p_xref:
                         page.delete_annot(annot)
                         break
-
-                # Convert colors
-                def hex_to_rgb(hex_color):
-                    hex_color = hex_color.lstrip('#')
-                    return tuple(int(hex_color[i:i + 2], 16) / 255 for i in (0, 2, 4))
 
                 fg_rgb = hex_to_rgb(style.text_color)
 
@@ -996,26 +945,8 @@ class PDFViewer(QGraphicsView):
         pdf_y = scene_pos.y() / self._zoom
 
         for annotation in self._annotations.get_for_page(self._current_page):
-            style = annotation.style
-            text = str(annotation.number)
-            # Handle 'p' suffix for width calculation
-            base_text = text[:-1] if text.endswith('p') else text
-            has_p_suffix = text.endswith('p')
-            p_fontsize = int(style.font_size * 0.5)
-
-            font = fitz.Font("helv")
-            base_width = font.text_length(base_text, fontsize=style.font_size)
-            p_width = font.text_length('p', fontsize=p_fontsize) if has_p_suffix else 0
-            text_width = base_width + p_width
-            text_height = style.font_size
-            padding = style.padding
-
-            rect = QRectF(
-                annotation.x,
-                annotation.y,
-                text_width + padding * 2,
-                text_height + padding * 2
-            )
+            ann_rect, *_ = calc_annotation_rect(annotation)
+            rect = QRectF(ann_rect.x0, ann_rect.y0, ann_rect.width, ann_rect.height)
 
             if rect.contains(pdf_x, pdf_y):
                 return annotation
@@ -1187,27 +1118,10 @@ class PDFViewer(QGraphicsView):
             return
 
         for annotation in self._annotations.all():
-            # Calculate expected rect
             style = annotation.style
-            text = str(annotation.number)
-            # Handle 'p' suffix
-            has_p_suffix = text.endswith('p')
-            base_text = text[:-1] if has_p_suffix else text
-            p_fontsize = int(style.font_size * 0.5)
-
-            font = fitz.Font("helv")
-            base_width = font.text_length(base_text, fontsize=style.font_size)
-            p_width = font.text_length('p', fontsize=p_fontsize) if has_p_suffix else 0
-            text_width = base_width + p_width
-            text_height = style.font_size
+            expected_rect, base_text, has_p_suffix, p_fontsize, text_width, text_height = calc_annotation_rect(annotation)
             padding = style.padding
-
-            expected_rect = fitz.Rect(
-                annotation.x,
-                annotation.y,
-                annotation.x + text_width + padding * 2,
-                annotation.y + text_height + padding * 2
-            )
+            base_width = _HELV_FONT.text_length(base_text, fontsize=style.font_size)
 
             # Calculate expected 'p' position
             p_x = expected_rect.x0 + padding + base_width
@@ -1223,7 +1137,6 @@ class PDFViewer(QGraphicsView):
             for annot in page.annots():
                 if annot.type[0] == fitz.PDF_ANNOT_FREE_TEXT:
                     annot_rect = annot.rect
-                    # Check if rectangles match (within 2 pixels)
                     if (abs(annot_rect.x0 - expected_rect.x0) < 2 and
                         abs(annot_rect.y0 - expected_rect.y0) < 2 and
                         abs(annot_rect.x1 - expected_rect.x1) < 2 and
@@ -1236,10 +1149,9 @@ class PDFViewer(QGraphicsView):
                 for annot in page.annots():
                     if annot.type[0] == fitz.PDF_ANNOT_FREE_TEXT:
                         annot_rect = annot.rect
-                        # Check if this is the small 'p' annotation (near expected position)
                         if (abs(annot_rect.x0 - p_x) < 5 and
                             abs(annot_rect.y0 - p_y) < 5 and
-                            annot_rect.width < text_height):  # 'p' rect is smaller
+                            annot_rect.width < text_height):
                             annotation.pdf_p_xref = annot.xref
                             break
 
@@ -1247,10 +1159,9 @@ class PDFViewer(QGraphicsView):
             if style.tail_enabled:
                 for annot in page.annots():
                     if annot.type[0] == fitz.PDF_ANNOT_LINE:
-                        # Check if line starts at expected position
                         vertices = annot.vertices
                         if vertices and len(vertices) >= 2:
-                            start = vertices[0]  # tuple (x, y)
+                            start = vertices[0]
                             end = vertices[1]
                             if (abs(start[0] - center_x) < 3 and
                                 abs(start[1] - tail_start_y) < 3 and
@@ -1263,8 +1174,6 @@ class PDFViewer(QGraphicsView):
         """Save our annotation data as JSON in PDF metadata."""
         if not self._doc:
             return
-
-        import json
 
         # Serialize annotation store to JSON
         annotations_json = self._annotations.to_json()
@@ -1280,8 +1189,6 @@ class PDFViewer(QGraphicsView):
         """Load our annotation data from PDF metadata. Returns True if found."""
         if not self._doc:
             return False
-
-        import json
 
         try:
             metadata = self._doc.metadata

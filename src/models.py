@@ -98,6 +98,7 @@ class NumberAnnotation:
 
     @classmethod
     def from_dict(cls, data: dict) -> "NumberAnnotation":
+        data = dict(data)  # Avoid mutating caller's dict
         style_data = data.pop('style', {})
         style = NumberStyle.from_dict(style_data) if style_data else NumberStyle()
         # Ensure number is string
@@ -114,7 +115,6 @@ class NumberAnnotation:
             y=self.y,
             number=self.number,
             style=NumberStyle(**asdict(self.style)),
-            applied_to_pdf=False
         )
 
     def sort_key(self) -> tuple[int, int]:

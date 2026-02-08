@@ -173,7 +173,7 @@ class ThumbnailPanel(QScrollArea):
         else:
             fmt = QImage.Format.Format_RGB888
 
-        img = QImage(pix.samples, pix.width, pix.height, pix.stride, fmt)
+        img = QImage(pix.samples, pix.width, pix.height, pix.stride, fmt).copy()
         pixmap = QPixmap.fromImage(img)
 
         self._thumbnails[page_index].set_thumbnail(pixmap)
